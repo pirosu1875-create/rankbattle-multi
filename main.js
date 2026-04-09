@@ -102,6 +102,9 @@ window.onload = () => {
         if (data.type === 'start-positions') {
             console.log("【受信】開始位置を同期しました");
 
+            if (payload.mapData) {
+                gameInstance.map.data = payload.mapData; 
+            }
             // 1. まず相手のキャラを確定させる
             if (!gameInstance.rivalPlayer) gameInstance.rivalPlayer = new Player(0, 0);
             gameInstance.rivalPlayer.setClass(payload.myClass); // ホストのクラス
@@ -128,6 +131,9 @@ window.onload = () => {
         // --- 4. 相手の位置更新 ---
         if (data.type === 'player-update' && gameInstance.rivalPlayer) {
             const p = gameInstance.rivalPlayer;
+            if (payload.className && (!p.config || p.config.name.toUpperCase() !== payload.className)) {
+                p.setClass(payload.className);
+            }
             p.x = payload.x;
             p.y = payload.y;
             p.angle = payload.angle;
@@ -557,10 +563,11 @@ class Game {
             }
 
             window.network.sendData('start-positions', {
+                mapData: this.map.data, // ★マップデータを送信
                 myPos: { x: this.player.x, y: this.player.y },
-                myClass: this.player.config.name, // ホストのキャラ
+                myClass: this.player.config.name.toUpperCase(), // 大文字で送信
                 rivalPos: this.rivalPlayer ? { x: this.rivalPlayer.x, y: this.rivalPlayer.y } : null,
-                rivalClass: this.rivalPlayer ? this.rivalPlayer.config.name : 'GUNNER' // ゲストのキャラ
+                rivalClass: this.rivalPlayer ? this.rivalPlayer.config.name.toUpperCase() : 'GUNNER'
             });
 
             // ★相手（rivalPlayer）がまだ作られていなければ、この瞬間に無理やり作る
@@ -578,11 +585,17 @@ class Game {
         if (uiLayer) uiLayer.classList.remove('hidden');
 
         // 4. 自分の最新位置を送信
+        // Game.update(dt) 内の送信部分
         if (window.network) {
+            // 第一引数に 'タイプ'、第二引数に '中身のオブジェクト' を渡す
             window.network.sendData('player-update', {
                 x: this.player.x,
                 y: this.player.y,
-                angle: this.player.angle
+                angle: this.player.angle,
+                className: this.player.config.name.toUpperCase(), // ★追加：毎フレーム自分のクラスを送る
+                isAttacking: this.player.isAttacking,
+                isShielding: this.player.isShielding,
+                isBagworm: this.player.isBagworm
             });
         }
     }
@@ -1536,7 +1549,9 @@ class Player {
             if (this.canMoveTo(this.x + dx, this.y, map)) this.x += dx;
             if (this.canMoveTo(this.x, this.y + dy, map)) this.y += dy;
         }
-        this.pushOutOfWalls(map);
+        if (this.isControlPlayer) {
+            this.pushOutOfWalls(map);
+        }
 
         if (this.ammo < this.maxAmmo) {
             this.reloadTimer += dt;
