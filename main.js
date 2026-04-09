@@ -286,13 +286,13 @@ const TRG_CLASSES = {
     SCORPION: {
         name: 'Scorpion', color: '#f43f5e', speed: 150, maxAmmo: 3,
         reloadSpeed: 1.0, shootDelay: 0.35, bulletSpeed: 450,
-        damage: 30, range: 120, burst: 1, aimType: 'arc', pierce: false, assetBase: 'kuga',
+        damage: 30, range: 110, burst: 1, aimType: 'arc', pierce: false, assetBase: 'kuga',
         shieldWidth: 0.7, maxSP: 150, shieldDeploySpeed: 0, shieldSpeedMult: 0.9
     },
     KOGETSU: {
         name: 'Kogetsu', color: '#e2e8f0', speed: 135, maxAmmo: 2,
         reloadSpeed: 1.2, shootDelay: 0.5, bulletSpeed: 650,
-        damage: 45, range: 160, burst: 1, aimType: 'arc', pierce: false, assetBase: 'tachikawa',
+        damage: 45, range: 130, burst: 1, aimType: 'arc', pierce: false, assetBase: 'tachikawa',
         shieldWidth: 0.9, maxSP: 150, shieldDeploySpeed: 0, shieldSpeedMult: 0.85
     },
     SNIPER: {
@@ -1359,34 +1359,63 @@ class Bullet {
         return Math.sqrt(dx * dx + dy * dy) < ent.size / 2 + this.size;
     }
     render(ctx) {
+        let drawX = this.x;
+        let drawY = this.y;
+        let currentSize = this.size;
+
+        // --- 弾が「浮いている」時の視覚エフェクト ---
+        if (this.ignoreWallTimer > 0 && this.initialIgnoreWallTime > 0) {
+            const progress = 1 - (this.ignoreWallTimer / this.initialIgnoreWallTime);
+            const jumpHeight = Math.sin(progress * Math.PI) * 50;
+
+            // ① 影を描画 (地面の位置)
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.size * 0.8, 0, Math.PI * 2);
+            ctx.fill();
+
+            // ② 描画用の座標とサイズを更新
+            drawY = this.y - jumpHeight;
+            currentSize = this.size * (1 + (jumpHeight / 100));
+        }
         if (this.isSlash) {
             ctx.save();
-            ctx.translate(this.x, this.y);
+            ctx.translate(drawX, drawY);
             ctx.rotate(this.angle);
 
+            // --- Bullet クラスの render 内 ---
             if (this.ownerClass === 'Kogetsu' || this.ownerClass === 'Senku') {
-                // 1. まず、外側の「強い光（グロー）」を描く
+                // 固定数字を消して、弾が持つ本来のサイズ(this.size)で描くようにします
+                const radius = currentSize;
                 const isSenku = this.ownerClass === 'Senku';
-                const radius = isSenku ? 140 : 55; // ★旋空は超巨大な円弧に！
 
-                // 1. 外側の「強い光（グロー）」
                 ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
-                ctx.lineWidth = isSenku ? 20 : 12; // 旋空はさらに太く
+                ctx.lineWidth = isSenku ? 20 : 12;
                 ctx.lineCap = 'round';
-                ctx.shadowBlur = isSenku ? 40 : 25; // 光のぼかしも最強に
+                ctx.shadowBlur = isSenku ? 40 : 25;
                 ctx.shadowColor = '#fff';
 
                 ctx.beginPath();
                 ctx.arc(0, 0, radius, -1, 1);
                 ctx.stroke();
 
-                // 2. 芯となる「鋭い白刃」
                 ctx.shadowBlur = 0;
                 ctx.strokeStyle = '#ffffff';
-                ctx.lineWidth = isSenku ? 8 : 4; // 芯も太く鋭く
+                ctx.lineWidth = isSenku ? 8 : 4;
 
                 ctx.beginPath();
                 ctx.arc(0, 0, radius, -1, 1);
+                ctx.stroke();
+            } else if (this.ownerClass === 'Mantis') {
+                // --- マンティス：長く鋭い赤い閃光 ---
+                ctx.strokeStyle = '#f43f5e';
+                ctx.lineWidth = 5;
+                ctx.lineCap = 'round';
+                ctx.shadowBlur = 20;
+                ctx.shadowColor = '#f43f5e';
+
+                ctx.beginPath();
+                ctx.arc(0, 0, currentSize, -0.5, 0.5); // 鋭い弧を描く
                 ctx.stroke();
             } else {
                 // --- スコーピオン：青緑の素早い刃 ---
@@ -1405,21 +1434,35 @@ class Bullet {
         } else {
             // ▼▼▼ ここから書き換える ▼▼▼
             ctx.save(); // ハウンドの光が他の弾にうつらないようにする
-
-            if (this.ownerClass === 'Hound') {
-                // ハウンド専用の描画（紫色に光らせる）
-                ctx.fillStyle = '#75cf89ff';
-                ctx.shadowBlur = 12;
-                ctx.shadowColor = '#86e981ff';
-
-                // 【おまけ】少し弾を大きく見せると強そうです
+            if (this.isLeadBullet) {
+                // --- 鉛弾（レッドバレッド）の描画 ---
+                ctx.fillStyle = '#111111'; // 真っ黒
+                ctx.shadowBlur = 15;
+                ctx.shadowColor = '#000000';
                 ctx.beginPath();
-                ctx.arc(this.x, this.y, this.size * 1.5, 0, Math.PI * 2);
+                ctx.arc(drawX, drawY, currentSize * 1.8, 0, Math.PI * 2);
                 ctx.fill();
-            } else {
-                ctx.fillStyle = this.ownerTeam === 'blue' ? '#c3eabcff' : '#f43f5e';
-                ctx.beginPath(); ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2); ctx.fill();
-            }
+
+                // 中心に少しハイライト
+                ctx.fillStyle = '#333333';
+                ctx.beginPath();
+                ctx.arc(drawX, drawY, currentSize * 0.5, 0, Math.PI * 2);
+                ctx.fill();
+            } else
+                if (this.ownerClass === 'Hound') {
+                    // ハウンド専用の描画（紫色に光らせる）
+                    ctx.fillStyle = '#75cf89ff';
+                    ctx.shadowBlur = 12;
+                    ctx.shadowColor = '#86e981ff';
+
+                    // 【おまけ】少し弾を大きく見せると強そうです
+                    ctx.beginPath();
+                    ctx.arc(drawX, drawY, currentSize * 1.5, 0, Math.PI * 2);
+                    ctx.fill();
+                } else {
+                    ctx.fillStyle = this.ownerTeam === 'blue' ? '#c3eabcff' : '#f43f5e';
+                    ctx.beginPath(); ctx.arc(drawX, drawY, currentSize, 0, Math.PI * 2); ctx.fill();
+                }
             ctx.restore();
         }
     }
@@ -1775,20 +1818,77 @@ class Player {
             indicatorColor = '#f43f5e';
         }
 
-        if (showIndicator) {
+if (showIndicator) {
+            ctx.save(); // 線の設定が他の描画に影響しないように保存
             ctx.strokeStyle = indicatorColor;
+
             if (cfg.aimType === 'arc') {
+                // --- 孤月・スコーピオンの扇形インジケーター ---
+
+                // 旋空スキルが「発動待機中」かどうかを正しく判定
+                const isSenku = (cfg.name === 'Kogetsu' && this.selectedSkill === 'SENKU' && this.isSkillPrimed);
+                const isMantis = (cfg.name === 'Scorpion' && this.selectedSkill === 'MANTIS' && this.isSkillPrimed);
+
+                // ★ ここで射程の倍率と扇の角度を同期させる
+                let rangeMult = 1;
+                let fanAngle = 0.6; // スコーピオンのデフォルト
+
+                if (isSenku) {
+                    rangeMult = 3;
+                    fanAngle = 1;
+                } else if (isMantis) {
+                    rangeMult = 2.5; // shootWithAngle で設定した値と同じにする
+                    fanAngle = 0.3;  // shootWithAngle で設定した値と同じにする
+                } else if (cfg.name === 'Kogetsu') {
+                    fanAngle = 1;    // 弧月のデフォルト
+                }
+
                 ctx.beginPath();
                 ctx.moveTo(this.x, this.y);
-                const fanAngle = (cfg.name === 'KOGETSU') ? 1 : 0.6;
-                ctx.arc(this.x, this.y, cfg.range, this.angle - fanAngle, this.angle + fanAngle);
+
+                // 【重要】設定された range (160など) × 倍率 で円弧を描く
+                ctx.arc(this.x, this.y, cfg.range * rangeMult, this.angle - fanAngle, this.angle + fanAngle);
                 ctx.lineTo(this.x, this.y);
-                ctx.stroke();
+
+                if (isSenku || isMantis) {
+                    // 旋空用の特別演出：太い点線で表示
+                    ctx.lineWidth = 5;
+                    ctx.setLineDash([8, 8]);
+                    ctx.stroke();
+
+                    // 範囲内をうっすら光らせて「必殺技感」を出す
+                    ctx.fillStyle = this.team === 'blue' ? 'rgba(255, 255, 255, 0.15)' : 'rgba(244, 63, 94, 0.15)';
+                    ctx.fill();
+                } else {
+                    // 通常時の近接インジケーター：少し太めの実線
+                    ctx.lineWidth = 3;
+                    ctx.setLineDash([]); // 点線を解除
+                    ctx.stroke();
+                }
+
             } else {
-                ctx.lineWidth = 1;
-                if (cfg.name === 'Sniper' && isEnemy) ctx.setLineDash([2, 2]); else ctx.setLineDash([5, 5]);
-                ctx.beginPath(); ctx.moveTo(this.x, this.y); ctx.lineTo(this.x + Math.cos(this.angle) * cfg.range, this.y + Math.sin(this.angle) * cfg.range); ctx.stroke(); ctx.setLineDash([]);
+                // --- ガンナー・シューター・スナイパーの直線インジケーター ---
+
+                // 自分のスナイパーならエイムを見やすくするために線を太く実線にする
+                ctx.lineWidth = (this.isControlPlayer && cfg.name === 'Sniper') ? 3 : 2;
+
+                if (cfg.name === 'Sniper') {
+                    if (isEnemy) {
+                        ctx.setLineDash([2, 2]); // 敵が狙ってきた殺気は細かい赤い点線
+                    } else {
+                        ctx.setLineDash([]); // 自分のスナイパー射線はくっきりした実線
+                    }
+                } else {
+                    ctx.setLineDash([5, 5]); // ガンナーやシューターは普通の点線
+                }
+
+                ctx.beginPath();
+                ctx.moveTo(this.x, this.y);
+                // 設定値通りの長さで線を引く
+                ctx.lineTo(this.x + Math.cos(this.angle) * cfg.range, this.y + Math.sin(this.angle) * cfg.range);
+                ctx.stroke();
             }
+            ctx.restore(); // 線の太さや点線の設定をリセット
         }
 
         // キャラクター本体の描画
