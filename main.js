@@ -103,7 +103,7 @@ window.onload = () => {
             console.log("【受信】開始位置を同期しました");
 
             if (payload.mapData) {
-                gameInstance.map.data = payload.mapData; 
+                gameInstance.map.data = payload.mapData;
             }
             // 1. まず相手のキャラを確定させる
             if (!gameInstance.rivalPlayer) gameInstance.rivalPlayer = new Player(0, 0);
@@ -131,8 +131,11 @@ window.onload = () => {
         // --- 4. 相手の位置更新 ---
         if (data.type === 'player-update' && gameInstance.rivalPlayer) {
             const p = gameInstance.rivalPlayer;
-            if (payload.className && (!p.config || p.config.name.toUpperCase() !== payload.className)) {
-                p.setClass(payload.className);
+            if (payload.className) {
+                const upperName = payload.className.toUpperCase();
+                if (!p.config || p.config.name.toUpperCase() !== upperName) {
+                    p.setClass(upperName);
+                }
             }
             p.x = payload.x;
             p.y = payload.y;
@@ -988,262 +991,264 @@ class Game {
         // }
 
         // 5. 弾の更新と当たり判定（ここをこの1つのブロックだけにしてください）
+// --- 5. 弾の更新と当たり判定（ここから） ---
         for (let i = this.bullets.length - 1; i >= 0; i--) {
             const bul = this.bullets[i];
             bul.update(dt);
 
             let hit = false;
-            const targets = (bul.ownerTeam === 'blue') ? enemiesOfBlue : enemiesOfRed;
+            // 自分(player)が撃った弾か、相手(rivalPlayer)が撃った弾かを判定
+            const isMyBullet = (bul.ownerTeam === this.player.team);
+            const targets = isMyBullet ? [this.rivalPlayer] : [this.player];
 
             for (const t of targets) {
+                if (!t || t.isDead || t.isBailingOut) continue;
+
                 if (bul.checkEntityCollision(t)) {
-                    // --- A. ダメージ計算（シールド判定含む） ---
-                    let finalDamage = bul.damage;
-                    if (t.isBagworm) t.toggleBagworm(false);
+                    // ★ダメージ計算は「自分の画面で相手に当てた時」だけ実行
+                    if (isMyBullet && t === this.rivalPlayer) {
+                        let finalDamage = bul.damage;
+                        if (t.isBagworm) t.toggleBagworm(false);
 
-                    if (t.isShielding && !t.isBroken && t.checkShield(bul.angle)) {
-                        t.sp -= bul.damage;
-                        finalDamage = bul.damage * 0.1; // シールド時は10%に軽減
-                        if (t.sp <= 0) {
-                            t.sp = 0; t.isBroken = true; t.brokenTimer = 5; t.isShielding = false;
+                        // シールド判定
+                        if (t.isShielding && !t.isBroken && t.checkShield(bul.angle)) {
+                            finalDamage = bul.damage * 0.1; // 9割カット
                         }
-                    }
 
-                    // --- B. 同期の振り分け（二重ダメージ防止） ---
-                    if (t === this.rivalPlayer) {
-                        // 自分が「相手」に当てた：HPを減らしてダメージを送信
+                        // 自分の画面上の相手のHPを減らす（即座に反映させるため）
                         t.hp -= finalDamage;
+
+                        // 相手にダメージ確定を通知
                         if (window.network) {
-                            window.network.sendData('apply-damage', { damage: finalDamage });
+                            window.network.sendData('apply-damage', { 
+                                damage: finalDamage,
+                                from: this.player.team 
+                            });
+                        }
+                        
+                        // 撃破判定
+                        if (t.hp <= 0) {
+                            t.startBailOut();
+                            if (this.player.team === 'blue') this.scores.blue++; else this.scores.red++;
                         }
                     }
-                    else if (t === this.player) {
-                        // 相手の弾が「自分」に当たった：ここでは計算せず、相手からの通信を待つ
-                    }
-                    else {
-                        // Botに当たった：その場で計算
-                        t.hp -= finalDamage;
-                    }
-
-                    // --- C. 撃破判定 ---
-                    if (t.hp <= 0 && !t.isDead && !t.isBailingOut) {
-                        t.startBailOut();
-                        if (bul.ownerTeam === 'blue') this.scores.blue++; else this.scores.red++;
-                    }
-
+                    
                     hit = true;
-                    break;
+                    break; 
                 }
             }
 
+            // 壁衝突または寿命、またはヒットした弾を消去
             if (hit || bul.life <= 0 || (!bul.pierce && bul.checkWallCollision(this.map))) {
                 this.bullets.splice(i, 1);
             }
         }
+        // --- 5. 弾の更新と当たり判定（ここまで） ---
 
-        // 6. 演出・通信・HUD
-        for (let i = this.effects.length - 1; i >= 0; i--) {
-            this.effects[i].life -= dt;
-            if (this.effects[i].life <= 0) this.effects.splice(i, 1);
+            // 6. 演出・通信・HUD
+            for (let i = this.effects.length - 1; i >= 0; i--) {
+                this.effects[i].life -= dt;
+                if (this.effects[i].life <= 0) this.effects.splice(i, 1);
+            }
+
+            const tx = this.player.x - (this.canvas.width / 2) / this.zoom;
+            const ty = this.player.y - (this.canvas.height / 2) / this.zoom;
+            this.camera.x += (tx - this.camera.x) * 0.1;
+            this.camera.y += (ty - this.camera.y) * 0.1;
+
+            // Game.update(dt) 内の送信部分
+
+            if (window.network) {
+                // 第一引数に 'タイプ'、第二引数に '中身のオブジェクト' を渡す
+                window.network.sendData('player-update', {
+                    x: this.player.x,
+                    y: this.player.y,
+                    angle: this.player.angle,
+                    isAttacking: this.player.isAttacking,
+                    isShielding: this.player.isShielding,
+                    isBagworm: this.player.isBagworm
+                });
+            }
+
+            if (this.rivalReady) {
+                if (enemiesOfRed.length === 0) this.endGame('RED WINS');
+                else if (enemiesOfBlue.length === 0) this.endGame('BLUE WINS');
+            }
+
+            this.updateHUD();
         }
 
-        const tx = this.player.x - (this.canvas.width / 2) / this.zoom;
-        const ty = this.player.y - (this.canvas.height / 2) / this.zoom;
-        this.camera.x += (tx - this.camera.x) * 0.1;
-        this.camera.y += (ty - this.camera.y) * 0.1;
 
-        // Game.update(dt) 内の送信部分
+        updateHUD() {
+            const min = Math.floor(this.gameTime / 60);
+            const sec = Math.floor(this.gameTime % 60);
+            document.getElementById('timer-display').innerText = `${String(min).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+            document.getElementById('score-blue').innerText = this.scores.blue;
+            document.getElementById('score-red').innerText = this.scores.red;
 
-        if (window.network) {
-            // 第一引数に 'タイプ'、第二引数に '中身のオブジェクト' を渡す
-            window.network.sendData('player-update', {
-                x: this.player.x,
-                y: this.player.y,
-                angle: this.player.angle,
-                isAttacking: this.player.isAttacking,
-                isShielding: this.player.isShielding,
-                isBagworm: this.player.isBagworm
-            });
-        }
+            const spPercent = (this.player.sp / this.player.maxSP) * 100;
+            const shieldBar = document.getElementById('status-shield-bar');
+            if (shieldBar) {
+                shieldBar.style.width = `${spPercent}%`;
+                shieldBar.classList.toggle('broken', this.player.isBroken);
+            }
 
-        if (this.rivalReady) {
-            if (enemiesOfRed.length === 0) this.endGame('RED WINS');
-            else if (enemiesOfBlue.length === 0) this.endGame('BLUE WINS');
-        }
+            const ammoInfo = document.getElementById('status-ammo');
+            if (ammoInfo && this.player.config) {
+                const p = this.player;
+                let html = `<div class="btn-name">${p.config.name.toUpperCase()}</div><div class="ammo-dots">`;
+                for (let i = 0; i < p.maxAmmo; i++) html += `<div class="ammo-dot ${i < p.ammo ? 'filled' : ''}"></div>`;
+                html += `</div>`;
+                ammoInfo.innerHTML = html;
+            }
 
-        this.updateHUD();
-    }
+            const bagwormBtn = document.getElementById('bagworm-btn');
+            if (bagwormBtn) bagwormBtn.classList.toggle('active', this.player.isBagworm);
 
-    updateHUD() {
-        const min = Math.floor(this.gameTime / 60);
-        const sec = Math.floor(this.gameTime % 60);
-        document.getElementById('timer-display').innerText = `${String(min).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
-        document.getElementById('score-blue').innerText = this.scores.blue;
-        document.getElementById('score-red').innerText = this.scores.red;
+            // ★ スキルボタンの表示切り替え
+            const skillBtn = document.getElementById('skill-btn');
+            if (skillBtn) {
+                const p = this.player;
+                if (p.selectedSkill) {
+                    skillBtn.style.display = 'flex';
 
-        const spPercent = (this.player.sp / this.player.maxSP) * 100;
-        const shieldBar = document.getElementById('status-shield-bar');
-        if (shieldBar) {
-            shieldBar.style.width = `${spPercent}%`;
-            shieldBar.classList.toggle('broken', this.player.isBroken);
-        }
-
-        const ammoInfo = document.getElementById('status-ammo');
-        if (ammoInfo && this.player.config) {
-            const p = this.player;
-            let html = `<div class="btn-name">${p.config.name.toUpperCase()}</div><div class="ammo-dots">`;
-            for (let i = 0; i < p.maxAmmo; i++) html += `<div class="ammo-dot ${i < p.ammo ? 'filled' : ''}"></div>`;
-            html += `</div>`;
-            ammoInfo.innerHTML = html;
-        }
-
-        const bagwormBtn = document.getElementById('bagworm-btn');
-        if (bagwormBtn) bagwormBtn.classList.toggle('active', this.player.isBagworm);
-
-        // ★ スキルボタンの表示切り替え
-        const skillBtn = document.getElementById('skill-btn');
-        if (skillBtn) {
-            const p = this.player;
-            if (p.selectedSkill) {
-                skillBtn.style.display = 'flex';
-
-                if (p.skillTimer > 0) {
-                    // ★ クールダウン中は残り秒数を表示（小数点第1位まで）
-                    skillBtn.innerText = p.skillTimer.toFixed(1) + "s";
-                    skillBtn.classList.remove('active'); // クールダウン中は光らせない
-                    skillBtn.style.opacity = "0.5";      // 少し暗くする
-                } else {
-                    // ★修正：待機中は残り回数を表示、そうでなければスキル名を表示
-                    if (p.isSkillPrimed) {
-                        skillBtn.innerText = `${p.selectedSkill} (${p.skillCharges})`;
+                    if (p.skillTimer > 0) {
+                        // ★ クールダウン中は残り秒数を表示（小数点第1位まで）
+                        skillBtn.innerText = p.skillTimer.toFixed(1) + "s";
+                        skillBtn.classList.remove('active'); // クールダウン中は光らせない
+                        skillBtn.style.opacity = "0.5";      // 少し暗くする
                     } else {
-                        skillBtn.innerText = p.selectedSkill;
+                        // ★修正：待機中は残り回数を表示、そうでなければスキル名を表示
+                        if (p.isSkillPrimed) {
+                            skillBtn.innerText = `${p.selectedSkill} (${p.skillCharges})`;
+                        } else {
+                            skillBtn.innerText = p.selectedSkill;
+                        }
+                        skillBtn.style.opacity = "1.0";
+                        skillBtn.classList.toggle('active', p.isSkillPrimed);
                     }
-                    skillBtn.style.opacity = "1.0";
-                    skillBtn.classList.toggle('active', p.isSkillPrimed);
+                } else {
+                    skillBtn.style.display = 'none';
                 }
-            } else {
-                skillBtn.style.display = 'none';
             }
+
         }
 
-    }
-
-    endGame(msg) {
-        this.state = 'result';
-        document.getElementById('ui-layer').classList.add('hidden');
-        const bo = document.getElementById('bailout-text');
-        if (bo) { bo.classList.add('hidden'); bo.style.display = 'none'; }
-        document.getElementById('result-screen').classList.remove('hidden');
-        document.getElementById('result-title').innerText = msg;
-        document.getElementById('result-blue').innerText = this.scores.blue;
-        document.getElementById('result-red').innerText = this.scores.red;
-    }
-
-    render() {
-        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-
-        this.ctx.save();
-        this.ctx.scale(this.zoom, this.zoom);
-        this.ctx.translate(-this.camera.x, -this.camera.y);
-
-        if (this.map) {
-            this.map.render(this.ctx, this.camera, this.canvas.width / this.zoom, this.canvas.height / this.zoom, 'base');
+        endGame(msg) {
+            this.state = 'result';
+            document.getElementById('ui-layer').classList.add('hidden');
+            const bo = document.getElementById('bailout-text');
+            if (bo) { bo.classList.add('hidden'); bo.style.display = 'none'; }
+            document.getElementById('result-screen').classList.remove('hidden');
+            document.getElementById('result-title').innerText = msg;
+            document.getElementById('result-blue').innerText = this.scores.blue;
+            document.getElementById('result-red').innerText = this.scores.red;
         }
 
-        if (this.state === 'selecting' || this.state === 'setup') {
+        render() {
+            this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+
+            this.ctx.save();
+            this.ctx.scale(this.zoom, this.zoom);
+            this.ctx.translate(-this.camera.x, -this.camera.y);
+
+            if (this.map) {
+                this.map.render(this.ctx, this.camera, this.canvas.width / this.zoom, this.canvas.height / this.zoom, 'base');
+            }
+
+            if (this.state === 'selecting' || this.state === 'setup') {
+                this.ctx.restore();
+                return;
+            }
+
+            for (const fx of this.effects) {
+                if (fx.type === 'pillar') {
+                    const grad = this.ctx.createLinearGradient(0, fx.y - 600, 0, fx.y);
+                    grad.addColorStop(0, 'transparent'); grad.addColorStop(0.5, '#38bdf888'); grad.addColorStop(1, '#fff');
+                    this.ctx.fillStyle = grad;
+                    const width = 24 * Math.min(1, fx.life);
+                    this.ctx.fillRect(fx.x - width / 2, fx.y - 1200, width, 1200);
+                } else if (fx.type === 'trion_cube') {
+                    this.ctx.fillStyle = `rgba(56, 189, 248, ${fx.life * 2})`;
+                    this.ctx.fillRect(fx.x - fx.size / 2, fx.y - fx.size / 2, fx.size, fx.size);
+                } else if (fx.type === 'gather_particle') {
+                    this.ctx.fillStyle = `rgba(255, 255, 255, ${fx.life * 2})`;
+                    this.ctx.beginPath(); this.ctx.arc(fx.x, fx.y, fx.size, 0, Math.PI * 2); this.ctx.fill();
+                }
+            }
+            for (const b of this.bullets) b.render(this.ctx);
+
+            if (!this.player.isDead) this.player.render(this.ctx, this.map);
+            // render() メソッドの中、this.player.render の直後に追加
+            if (this.rivalPlayer && !this.rivalPlayer.isDead) {
+                this.rivalPlayer.render(this.ctx, this.map);
+            }
+            // for (const b of this.bots) if (!b.isDead) b.render(this.ctx, this.map);
+
+            this.map.render(this.ctx, this.camera, this.canvas.width / this.zoom, this.canvas.height / this.zoom, 'bushes');
+
             this.ctx.restore();
-            return;
-        }
 
-        for (const fx of this.effects) {
-            if (fx.type === 'pillar') {
-                const grad = this.ctx.createLinearGradient(0, fx.y - 600, 0, fx.y);
-                grad.addColorStop(0, 'transparent'); grad.addColorStop(0.5, '#38bdf888'); grad.addColorStop(1, '#fff');
+            this.drawMinimap();
+
+            if (this.zoom < 0.95) {
+                const grad = this.ctx.createRadialGradient(this.canvas.width / 2, this.canvas.height / 2, this.canvas.width * 0.3, this.canvas.width / 2, this.canvas.height / 2, this.canvas.width * 0.8);
+                grad.addColorStop(0, 'transparent'); grad.addColorStop(1, 'rgba(0,0,0,0.8)');
                 this.ctx.fillStyle = grad;
-                const width = 24 * Math.min(1, fx.life);
-                this.ctx.fillRect(fx.x - width / 2, fx.y - 1200, width, 1200);
-            } else if (fx.type === 'trion_cube') {
-                this.ctx.fillStyle = `rgba(56, 189, 248, ${fx.life * 2})`;
-                this.ctx.fillRect(fx.x - fx.size / 2, fx.y - fx.size / 2, fx.size, fx.size);
-            } else if (fx.type === 'gather_particle') {
-                this.ctx.fillStyle = `rgba(255, 255, 255, ${fx.life * 2})`;
-                this.ctx.beginPath(); this.ctx.arc(fx.x, fx.y, fx.size, 0, Math.PI * 2); this.ctx.fill();
+                this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
             }
-        }
-        for (const b of this.bullets) b.render(this.ctx);
 
-        if (!this.player.isDead) this.player.render(this.ctx, this.map);
-        // render() メソッドの中、this.player.render の直後に追加
-        if (this.rivalPlayer && !this.rivalPlayer.isDead) {
-            this.rivalPlayer.render(this.ctx, this.map);
-        }
-        // for (const b of this.bots) if (!b.isDead) b.render(this.ctx, this.map);
 
-        this.map.render(this.ctx, this.camera, this.canvas.width / this.zoom, this.canvas.height / this.zoom, 'bushes');
-
-        this.ctx.restore();
-
-        this.drawMinimap();
-
-        if (this.zoom < 0.95) {
-            const grad = this.ctx.createRadialGradient(this.canvas.width / 2, this.canvas.height / 2, this.canvas.width * 0.3, this.canvas.width / 2, this.canvas.height / 2, this.canvas.width * 0.8);
-            grad.addColorStop(0, 'transparent'); grad.addColorStop(1, 'rgba(0,0,0,0.8)');
-            this.ctx.fillStyle = grad;
-            this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
         }
 
+        drawMinimap() {
+            const miniCanvas = document.getElementById('minimap-canvas');
+            if (!miniCanvas) return;
+            const miniCtx = miniCanvas.getContext('2d');
+            const scale = miniCanvas.width / (MAP_WIDTH * TILE_SIZE);
+            miniCtx.clearRect(0, 0, miniCanvas.width, miniCanvas.height);
+            miniCtx.fillStyle = 'rgba(255,255,255,0.1)';
+            for (let y = 0; y < MAP_HEIGHT; y++) for (let x = 0; x < MAP_WIDTH; x++) if (this.map.data[y][x] === 1) miniCtx.fillRect(x * TILE_SIZE * scale, y * TILE_SIZE * scale, TILE_SIZE * scale, TILE_SIZE * scale);
 
-    }
-
-    drawMinimap() {
-        const miniCanvas = document.getElementById('minimap-canvas');
-        if (!miniCanvas) return;
-        const miniCtx = miniCanvas.getContext('2d');
-        const scale = miniCanvas.width / (MAP_WIDTH * TILE_SIZE);
-        miniCtx.clearRect(0, 0, miniCanvas.width, miniCanvas.height);
-        miniCtx.fillStyle = 'rgba(255,255,255,0.1)';
-        for (let y = 0; y < MAP_HEIGHT; y++) for (let x = 0; x < MAP_WIDTH; x++) if (this.map.data[y][x] === 1) miniCtx.fillRect(x * TILE_SIZE * scale, y * TILE_SIZE * scale, TILE_SIZE * scale, TILE_SIZE * scale);
-
-        if (!this.player.isDead) {
-            const inBush = this.map.getTile(this.player.x, this.player.y) === 2;
-            const px = this.player.x * scale;
-            const py = this.player.y * scale;
-            miniCtx.fillStyle = '#38bdf8';
-            if (inBush) {
-                miniCtx.globalAlpha = 0.5;
-                miniCtx.beginPath(); miniCtx.arc(px, py, 3, 0, Math.PI * 2); miniCtx.fill();
-                miniCtx.globalAlpha = 1.0;
-                miniCtx.strokeStyle = '#fff'; miniCtx.lineWidth = 1;
-                miniCtx.beginPath(); miniCtx.arc(px, py, 3, 0, Math.PI * 2); miniCtx.stroke();
-            } else {
-                miniCtx.beginPath(); miniCtx.arc(px, py, 3, 0, Math.PI * 2); miniCtx.fill();
+            if (!this.player.isDead) {
+                const inBush = this.map.getTile(this.player.x, this.player.y) === 2;
+                const px = this.player.x * scale;
+                const py = this.player.y * scale;
+                miniCtx.fillStyle = '#38bdf8';
+                if (inBush) {
+                    miniCtx.globalAlpha = 0.5;
+                    miniCtx.beginPath(); miniCtx.arc(px, py, 3, 0, Math.PI * 2); miniCtx.fill();
+                    miniCtx.globalAlpha = 1.0;
+                    miniCtx.strokeStyle = '#fff'; miniCtx.lineWidth = 1;
+                    miniCtx.beginPath(); miniCtx.arc(px, py, 3, 0, Math.PI * 2); miniCtx.stroke();
+                } else {
+                    miniCtx.beginPath(); miniCtx.arc(px, py, 3, 0, Math.PI * 2); miniCtx.fill();
+                }
             }
+
+            // for (const b of this.bots) {
+            //     if (b.isDead) continue;
+            //     if (b.team === 'red' && (b.isBagworm || this.map.getTile(b.x, b.y) === 2)) continue;
+
+            //     miniCtx.fillStyle = (b.team === 'blue') ? '#38bdf8' : '#f43f5e';
+            //     if (b.team === 'blue' && this.map.getTile(b.x, b.y) === 2) {
+            //         miniCtx.globalAlpha = 0.5;
+            //         miniCtx.beginPath(); miniCtx.arc(b.x * scale, b.y * scale, 2, 0, Math.PI * 2); miniCtx.fill();
+            //         miniCtx.globalAlpha = 1.0;
+            //     } else {
+            //         miniCtx.beginPath(); miniCtx.arc(b.x * scale, b.y * scale, 2, 0, Math.PI * 2); miniCtx.fill();
+            //     }
+            // }
         }
 
-        // for (const b of this.bots) {
-        //     if (b.isDead) continue;
-        //     if (b.team === 'red' && (b.isBagworm || this.map.getTile(b.x, b.y) === 2)) continue;
-
-        //     miniCtx.fillStyle = (b.team === 'blue') ? '#38bdf8' : '#f43f5e';
-        //     if (b.team === 'blue' && this.map.getTile(b.x, b.y) === 2) {
-        //         miniCtx.globalAlpha = 0.5;
-        //         miniCtx.beginPath(); miniCtx.arc(b.x * scale, b.y * scale, 2, 0, Math.PI * 2); miniCtx.fill();
-        //         miniCtx.globalAlpha = 1.0;
-        //     } else {
-        //         miniCtx.beginPath(); miniCtx.arc(b.x * scale, b.y * scale, 2, 0, Math.PI * 2); miniCtx.fill();
-        //     }
-        // }
+        gameLoop(currentTime) {
+            const dt = (currentTime - this.lastTime) / 1000;
+            this.lastTime = currentTime;
+            this.update(Math.min(dt, 0.1));
+            this.render();
+            requestAnimationFrame(this.gameLoop.bind(this));
+        }
     }
-
-    gameLoop(currentTime) {
-        const dt = (currentTime - this.lastTime) / 1000;
-        this.lastTime = currentTime;
-        this.update(Math.min(dt, 0.1));
-        this.render();
-        requestAnimationFrame(this.gameLoop.bind(this));
-    }
-}
 
 class VirtualJoystick {
     constructor(side) {
