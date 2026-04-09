@@ -187,60 +187,72 @@ window.onload = () => {
     // 【ホストボタンの決定版：差し替えここから】
 
     // 【ホストボタンの設定】
+    // ▼▼▼ ここから差し替え ▼▼▼
+    // 【ホストボタンの設定】
     const btnHost = document.getElementById('btn-host');
     if (btnHost) {
         btnHost.addEventListener('click', () => {
             console.log("【1】ホストボタンがクリックされました");
 
+            // エラー防止：確実にグローバルの network を参照する
+            if (!window.network) {
+                console.error("network が初期化されていません！");
+                return;
+            }
+
             // --- A. 部屋作成成功時の処理を定義 ---
-            network.onRoomCreated = (id) => {
+            window.network.onRoomCreated = (id) => {
                 console.log("【3】部屋が作成されました。ID:", id);
-                // ここで画面を切り替える関数を呼ぶ
                 if (typeof showPasscodeScreen === 'function') {
                     showPasscodeScreen(id);
                 } else {
-                    console.error("showPasscodeScreen 関数が見つかりません！定義場所を確認してください。");
+                    console.error("showPasscodeScreen 関数が見つかりません！");
                 }
             };
 
             // --- B. 部屋作成を実行 ---
-            network.hostRoom();
+            window.network.hostRoom();
             console.log("【2】hostRoom()を実行しました");
 
             // --- C. 【念押し】すでにIDがある場合 ---
-            if (network.peer && network.peer.id) {
+            if (window.network.peer && window.network.peer.id) {
                 console.log("【補足】すでにIDが存在します");
-                showPasscodeScreen(network.peer.id);
+                showPasscodeScreen(window.network.peer.id);
             }
         });
     }
-}
-// 【差し替えここまで】
-const btnJoin = document.getElementById('btn-join');
-if (btnJoin) {
-    btnJoin.addEventListener('click', () => {
-        const roomId = document.getElementById('join-room-id').value.trim();
-        if (roomId) network.joinRoom(roomId);
-    });
-}
 
-// ★【修正2】接続確立時は、画面の切り替えとインスタンス作成だけに専念する
-network.onConnectionEstablished = () => {
-    if (window.game) return;
-    console.log("通信確立！");
-    document.getElementById('network-screen').classList.add('hidden');
-    document.getElementById('selection-screen').classList.remove('hidden');
-
-    gameInstance = new Game();
-    window.game = gameInstance;
-
-    // 修正版
-    if (network.isHost) {
-        // 第一引数にタイプ、第二引数に中身を渡す
-        network.sendData('init-map', {
-            mapData: gameInstance.map.data
+    // 【参加ボタンの設定】
+    const btnJoin = document.getElementById('btn-join');
+    if (btnJoin) {
+        btnJoin.addEventListener('click', () => {
+            const roomId = document.getElementById('join-room-id').value.trim();
+            // ここも window.network を確実に使用する
+            if (roomId && window.network) {
+                window.network.joinRoom(roomId);
+            }
         });
     }
+    // ▲▲▲ ここまで差し替え ▲▲▲
+
+    // ★【修正2】接続確立時は、画面の切り替えとインスタンス作成だけに専念する
+    network.onConnectionEstablished = () => {
+        if (window.game) return;
+        console.log("通信確立！");
+        document.getElementById('network-screen').classList.add('hidden');
+        document.getElementById('selection-screen').classList.remove('hidden');
+
+        gameInstance = new Game();
+        window.game = gameInstance;
+
+        // 修正版
+        if (network.isHost) {
+            // 第一引数にタイプ、第二引数に中身を渡す
+            network.sendData('init-map', {
+                mapData: gameInstance.map.data
+            });
+        }
+    };
 };
 
 
