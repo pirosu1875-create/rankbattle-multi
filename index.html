@@ -3,14 +3,16 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="viewport"
+        content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Rank Battle AR - ワールドトリガー風</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <script src="NetworkManager.js"></script>
     <link rel="stylesheet" href="style.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&family=Outfit:wght@400;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&family=Outfit:wght@400;700&display=swap"
+        rel="stylesheet">
 </head>
 
 <body>
@@ -21,29 +23,28 @@
             <div class="setup-content glass-box">
                 <h1 class="title">RANK BATTLE ONLINE</h1>
                 <div class="class-selection">
-                    <button id="btn-host" class="select-btn">
-                        <div class="btn-info">
-                            <span class="btn-name">ホストとして部屋を作る</span>
-                            <span class="btn-desc">合言葉を発行して友達を招待します</span>
+                    <button id="btn-host" class="select-btn" style="justify-content: center;">
+                        <div class="btn-info" style="text-align: center;">
+                            <span class="btn-name" style="display:block;">ホストとして部屋を作る</span>
+                            <span class="btn-desc">合言葉を発行して相手を待ちます</span>
                         </div>
                     </button>
-                    <div style="margin: 20px 0; border-top: 1px solid var(--glass-border);"></div>
-                    <input type="text" id="join-room-id" placeholder="合言葉を入力"
-                        style="padding: 12px; border-radius: 8px; border: 1px solid var(--primary); background: rgba(0,0,0,0.5); color: white; margin-bottom: 10px; width: 80%;">
-                    <button id="btn-join" class="select-btn">
-                        <div class="btn-info">
-                            <span class="btn-name">部屋に入る</span>
-                            <span class="btn-desc">友達の合言葉を入力して参加します</span>
+                    
+                    <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1);">
+                        <p style="font-size: 0.8rem; opacity: 0.7; margin-bottom: 10px;">相手の部屋に参加する</p>
+                        <div style="display: flex; gap: 10px;">
+                            <input type="text" id="join-room-id" placeholder="合言葉を入力" style="flex: 1; padding: 10px; border-radius: 8px; border: 1px solid #475569; background: rgba(0,0,0,0.5); color: white; font-size: 1rem; outline: none;">
+                            <button id="btn-join" class="select-btn" style="justify-content: center; padding: 10px 20px;">参加</button>
                         </div>
-                    </button>
+                    </div>
                 </div>
             </div>
         </div>
-
         <div id="selection-screen" class="overlay flex-center hidden">
             <div id="fs-btn-prep" class="glass-box fullscreen-btn-prep">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
+                    <path
+                        d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
                 </svg>
             </div>
 
@@ -93,7 +94,8 @@
                 <div id="skill-selection-step" class="hidden">
                     <h1 class="title">TRIGGER SET</h1>
                     <p id="selected-class-name" class="subtitle" style="color: #38bdf8;">POSITION NAME</p>
-                    <div id="skill-options" class="class-selection"></div>
+                    <div id="skill-options" class="class-selection">
+                    </div>
                     <button id="back-to-class" class="select-btn"
                         style="margin-top: 20px; justify-content: center; height: 50px; font-size: 0.9rem; border: 1px solid #475569;">
                         BACK TO POSITIONS
@@ -114,7 +116,10 @@
                     <span class="score-divider">VS</span>
                     <span id="result-red" class="score-num red">0</span>
                 </div>
-                <button class="select-btn" onclick="location.reload()" style="justify-content: center;">RESTART BATTLE</button>
+                <button id="restartbattle" class="select-btn" onclick="location.reload()"
+                    style="justify-content: center;">
+                    RESTART BATTLE
+                </button>
             </div>
         </div>
 
@@ -122,24 +127,35 @@
             <div class="top-ui">
                 <div class="status-panel glass-box">
                     <div id="status-ammo" class="ammo-info"></div>
-                    <div class="shield-container"><div id="status-shield-bar" class="shield-bar"></div></div>
+                    <div class="shield-container">
+                        <div id="status-shield-bar" class="shield-bar"></div>
+                    </div>
                 </div>
+
                 <div id="timer-display" class="glass-box">03:00</div>
+
                 <div id="team-score" class="glass-box team-score-panel">
                     <span id="score-blue" class="score-num blue">0</span>
                     <span class="score-divider">-</span>
                     <span id="score-red" class="score-num red">0</span>
                 </div>
-                <div id="minimap-container" class="glass-box"><canvas id="minimap-canvas" width="100" height="100"></canvas></div>
+
+                <div id="minimap-container" class="glass-box">
+                    <canvas id="minimap-canvas" width="100" height="100"></canvas>
+                </div>
             </div>
+
             <div class="bottom-ui">
                 <div id="bagworm-btn" class="glass-box bagworm-btn">BAGWORM</div>
                 <div id="shield-btn" class="glass-box shield-btn">SHIELD</div>
                 <button id="skill-btn" class="glass-box">SKILL</button>
             </div>
         </div>
+
         <div id="bailout-text" class="bailout-overlay hidden">ベイルアウト</div>
     </div>
+    
     <script src="main.js"></script>
 </body>
+
 </html>

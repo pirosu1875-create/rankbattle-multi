@@ -138,31 +138,31 @@ window.onload = () => {
         }
 
         // --- 5. 弾の同期 ---
+        // --- 弾の同期（スキル対応版） ---
         if (data.type === 'bullet-shot') {
             const rival = gameInstance.rivalPlayer;
             if (!rival) return;
-            // 1. 相手のクラスを強制的に更新（孤月なのかスコーピオンなのかをハッキリさせる）
-            // payload.className が "SCORPION" なら、rival.config が正しくセットされる
-            rival.setClass(payload.className);
 
-            // 2. スキル状態を同期
-            rival.isSkillPrimed = payload.isSkillPrimed;
+            // 相手のクラスと選択スキルを強制同期
+            rival.setClass(payload.className);
             rival.selectedSkill = payload.selectedSkill;
 
-            // 3. 相手の位置から、そのキャラの性能（arcなど）で撃たせる！
+            // 相手の位置と角度を正確に同期
             rival.x = payload.x;
             rival.y = payload.y;
-            // ★重要：相手のスキル状態を一時的に同期する（ハウンドや旋空を再現するため）
+            rival.angle = payload.angle;
+
+            // ★相手のスキル発動状態（光っているか等）を一時的に同期
             const originalSkill = rival.isSkillPrimed;
             rival.isSkillPrimed = payload.isSkillPrimed;
-            // ★ここが「いる」部分：rival自身に撃たせる！
-            // こうすれば、Playerクラスに書いた「4連射」や「スキルの弾」がそのまま相手画面に出ます。
+
+            // 相手自身に撃たせる（ここで特殊弾や旋空エフェクトが生成される）
             const bullets = rival.shootWithAngle(payload.angle, true);
             if (bullets) {
-                gameInstance.bullets.push(...bullets); // 生成された全弾（1発〜複数）を追加
+                gameInstance.bullets.push(...bullets);
             }
 
-            // 終わったらスキル状態を戻しておく
+            // 撃ち終わったらスキル状態を元に戻す
             rival.isSkillPrimed = originalSkill;
         }
     };
@@ -185,8 +185,8 @@ window.onload = () => {
     // 【ホスト・参加ボタンの設定】（ここは元のままでOK）
     // 【ホストボタンの設定】
     // 【ホストボタンの決定版：差し替えここから】
- 
-        // 【ホストボタンの設定】
+
+    // 【ホストボタンの設定】
     const btnHost = document.getElementById('btn-host');
     if (btnHost) {
         btnHost.addEventListener('click', () => {
@@ -214,35 +214,35 @@ window.onload = () => {
             }
         });
     }
-    
-    // 【差し替えここまで】
-    const btnJoin = document.getElementById('btn-join');
-    if (btnJoin) {
-        btnJoin.addEventListener('click', () => {
-            const roomId = document.getElementById('join-room-id').value.trim();
-            if (roomId) network.joinRoom(roomId);
+}
+// 【差し替えここまで】
+const btnJoin = document.getElementById('btn-join');
+if (btnJoin) {
+    btnJoin.addEventListener('click', () => {
+        const roomId = document.getElementById('join-room-id').value.trim();
+        if (roomId) network.joinRoom(roomId);
+    });
+}
+
+// ★【修正2】接続確立時は、画面の切り替えとインスタンス作成だけに専念する
+network.onConnectionEstablished = () => {
+    if (window.game) return;
+    console.log("通信確立！");
+    document.getElementById('network-screen').classList.add('hidden');
+    document.getElementById('selection-screen').classList.remove('hidden');
+
+    gameInstance = new Game();
+    window.game = gameInstance;
+
+    // 修正版
+    if (network.isHost) {
+        // 第一引数にタイプ、第二引数に中身を渡す
+        network.sendData('init-map', {
+            mapData: gameInstance.map.data
         });
     }
+};
 
-    // ★【修正2】接続確立時は、画面の切り替えとインスタンス作成だけに専念する
-    network.onConnectionEstablished = () => {
-        if (window.game) return;
-        console.log("通信確立！");
-        document.getElementById('network-screen').classList.add('hidden');
-        document.getElementById('selection-screen').classList.remove('hidden');
-
-        gameInstance = new Game();
-        window.game = gameInstance;
-
-        // 修正版
-        if (network.isHost) {
-            // 第一引数にタイプ、第二引数に中身を渡す
-            network.sendData('init-map', {
-                mapData: gameInstance.map.data
-            });
-        }
-    };
-}
 
 
 const TILE_SIZE = 32;
@@ -293,7 +293,7 @@ class Game {
         this.player.isControlPlayer = true;
         this.player.setClass('GUNNER');
 
-        this.bots = [];
+        // this.bots = [];
         this.bullets = [];
         this.effects = [];
         this.camera = { x: 0, y: 0 };
@@ -577,16 +577,75 @@ class Game {
 
     spawnEntity(ent, team) {
         let finalX = 0, finalY = 0;
+        let bestX = 0, bestY = 0;
+        let maxMinDist = -1; // 「最も敵から離れている距離」を記録する用
+
+        // まだ座標が決定していない（xとyが0）キャラは除外して、配置済みの全キャラを取得
+        // const allUnits = [this.player, this.rivalPlayer, ...this.bots]
+        const allUnits = [this.player, this.rivalPlayer]
+            .filter(u => u && u !== ent && (u.x !== 0 || u.y !== 0) && !u.isDead);
+        // .filter(u => u && u !== ent && (u.x !== 0 || u.y !== 0) && !u.isDead);
+
         for (let i = 0; i < 100; i++) {
+            // 壁から少し離れたランダムな座標を生成
             const rx = 100 + Math.random() * (MAP_WIDTH * TILE_SIZE - 200);
             const ry = 100 + Math.random() * (MAP_HEIGHT * TILE_SIZE - 200);
+
+            // 壁じゃない場所かチェック
             if (this.map.getTile(rx, ry) === 0) {
-                finalX = rx; finalY = ry; break;
+                let minDistToEnemy = Infinity;
+
+                // 配置済みの他のキャラクターとの距離を計算
+                for (const other of allUnits) {
+                    if (other.team !== team) { // 敵チームの場合のみ距離を気にする
+                        const dist = Math.sqrt((other.x - rx) ** 2 + (other.y - ry) ** 2);
+                        if (dist < minDistToEnemy) {
+                            minDistToEnemy = dist;
+                        }
+                    }
+                }
+
+                // 敵がまだ誰もいない場合は、即座にそこに決定
+                if (minDistToEnemy === Infinity) {
+                    finalX = rx; finalY = ry;
+                    break;
+                }
+
+                // ★ ここで安全な距離を指定！ (例: 500ピクセル以上離れていればOK)
+                if (minDistToEnemy > 500) {
+                    finalX = rx; finalY = ry;
+                    break;
+                }
+
+                // もし 500px 以上離れていなくても、一番マシ（敵から遠い）場所を記録しておく
+                if (minDistToEnemy > maxMinDist) {
+                    maxMinDist = minDistToEnemy;
+                    bestX = rx;
+                    bestY = ry;
+                }
             }
         }
-        ent.x = finalX; ent.y = finalY;
-        ent.team = team; ent.hp = ent.maxHp;
-        ent.isDead = false; ent.isBailingOut = false;
+
+        // 100回探しても完璧な場所が見つからなかった場合は、一番マシだった場所を選ぶ
+        if (finalX === 0 && finalY === 0) {
+            if (bestX !== 0 || bestY !== 0) {
+                finalX = bestX; finalY = finalY = bestY;
+            } else {
+                // 最悪のフェイルセーフ（通常は起こりません）
+                finalX = (MAP_WIDTH * TILE_SIZE) / 2;
+                finalY = (MAP_HEIGHT * TILE_SIZE) / 2;
+            }
+        }
+
+        // 決定した座標をセット
+        ent.x = finalX;
+        ent.y = finalY;
+        ent.team = team;
+        ent.hp = ent.maxHp;
+        ent.isDead = false;
+        ent.isBailingOut = false;
+
+        // 転送エフェクト（光の柱）
         if (this.spawnTransferEffect) this.spawnTransferEffect(finalX, finalY);
     }
 
@@ -801,7 +860,8 @@ class Game {
         let minDist = Infinity;
 
         // 全てのキャラ（自分、相手、Bot）を一つの配列にまとめる
-        const allUnits = [this.player, this.rivalPlayer, ...this.bots];
+        // const allUnits = [this.player, this.rivalPlayer, ...this.bots];
+        const allUnits = [this.player, this.rivalPlayer];
 
         for (const e of allUnits) {
             // 対象が存在しない、または自分自身、または死んでいる、または味方の場合はスキップ
@@ -830,14 +890,13 @@ class Game {
         if (this.gameTime <= 0) { this.endGame('TIME OVER'); return; }
 
         // 2. チーム集計（再宣言エラーが出ないよう、ここで一度だけ宣言）
-        const activeBots = this.bots.filter(b => !b.isDead);
-        let blueTeam = activeBots.filter(b => b.team === 'blue');
-        let redTeam = activeBots.filter(b => b.team === 'red');
+        // 2. チーム集計（Bot排除版）
+        let blueTeam = [];
+        let redTeam = [];
 
         if (window.network) {
             this.player.team = window.network.isHost ? 'blue' : 'red';
         }
-
         if (!this.player.isDead) {
             if (this.player.team === 'blue') blueTeam.push(this.player);
             else redTeam.push(this.player);
@@ -896,12 +955,12 @@ class Game {
         if (this.rivalPlayer && !this.rivalPlayer.isDead) {
             this.rivalPlayer.update(dt, 0, 0, this.map, this.rivalPlayer.angle, this.rivalPlayer.isAttacking);
         }
-        for (const b of activeBots) {
-            const enemies = (b.team === 'blue') ? enemiesOfBlue : enemiesOfRed;
-            b.updateAI(dt, this.map, enemies);
-            const bullets = b.shootAI(enemies);
-            if (bullets) this.bullets.push(...bullets);
-        }
+        // for (const b of activeBots) {
+        //     const enemies = (b.team === 'blue') ? enemiesOfBlue : enemiesOfRed;
+        //     b.updateAI(dt, this.map, enemies);
+        //     const bullets = b.shootAI(enemies);
+        //     if (bullets) this.bullets.push(...bullets);
+        // }
 
         // 5. 弾の更新と当たり判定（ここをこの1つのブロックだけにしてください）
         for (let i = this.bullets.length - 1; i >= 0; i--) {
@@ -1042,6 +1101,7 @@ class Game {
                 skillBtn.style.display = 'none';
             }
         }
+
     }
 
     endGame(msg) {
@@ -1093,7 +1153,7 @@ class Game {
         if (this.rivalPlayer && !this.rivalPlayer.isDead) {
             this.rivalPlayer.render(this.ctx, this.map);
         }
-        for (const b of this.bots) if (!b.isDead) b.render(this.ctx, this.map);
+        // for (const b of this.bots) if (!b.isDead) b.render(this.ctx, this.map);
 
         this.map.render(this.ctx, this.camera, this.canvas.width / this.zoom, this.canvas.height / this.zoom, 'bushes');
 
@@ -1136,19 +1196,19 @@ class Game {
             }
         }
 
-        for (const b of this.bots) {
-            if (b.isDead) continue;
-            if (b.team === 'red' && (b.isBagworm || this.map.getTile(b.x, b.y) === 2)) continue;
+        // for (const b of this.bots) {
+        //     if (b.isDead) continue;
+        //     if (b.team === 'red' && (b.isBagworm || this.map.getTile(b.x, b.y) === 2)) continue;
 
-            miniCtx.fillStyle = (b.team === 'blue') ? '#38bdf8' : '#f43f5e';
-            if (b.team === 'blue' && this.map.getTile(b.x, b.y) === 2) {
-                miniCtx.globalAlpha = 0.5;
-                miniCtx.beginPath(); miniCtx.arc(b.x * scale, b.y * scale, 2, 0, Math.PI * 2); miniCtx.fill();
-                miniCtx.globalAlpha = 1.0;
-            } else {
-                miniCtx.beginPath(); miniCtx.arc(b.x * scale, b.y * scale, 2, 0, Math.PI * 2); miniCtx.fill();
-            }
-        }
+        //     miniCtx.fillStyle = (b.team === 'blue') ? '#38bdf8' : '#f43f5e';
+        //     if (b.team === 'blue' && this.map.getTile(b.x, b.y) === 2) {
+        //         miniCtx.globalAlpha = 0.5;
+        //         miniCtx.beginPath(); miniCtx.arc(b.x * scale, b.y * scale, 2, 0, Math.PI * 2); miniCtx.fill();
+        //         miniCtx.globalAlpha = 1.0;
+        //     } else {
+        //         miniCtx.beginPath(); miniCtx.arc(b.x * scale, b.y * scale, 2, 0, Math.PI * 2); miniCtx.fill();
+        //     }
+        // }
     }
 
     gameLoop(currentTime) {
@@ -1234,43 +1294,30 @@ class Bullet {
         this.damage = damage; this.life = life; this.ownerTeam = ownerTeam; this.size = size;
         this.ownerClass = ownerClass;
         this.isSlash = false; this.pierce = false;
+        this.ignoreWallTimer = 0;
+        this.initialIgnoreWallTime = 0;
+        this.isLeadBullet = false;
     }
     update(dt) {
-        // --- ここから【ハウンド(誘導弾)】の追尾ロジック ---
+        // --- ハウンド(誘導弾) 1対1専用の追尾ロジック ---
         if (this.ownerClass === 'Hound' && window.game) {
-            let nearest = null;
-            let minDist = 300; // 誘導が効く範囲
-            const targets = [];
+            // 敵は常に自分とは違うチームの相手
+            let target = (this.ownerTeam === window.game.player.team) ? window.game.rivalPlayer : window.game.player;
 
-            // 1. Botをターゲット候補に入れる
-            window.game.bots.forEach(b => {
-                if (b.team !== this.ownerTeam && !b.isDead && !b.isBailingOut) targets.push(b);
-            });
-            // 2. 自分(player)が敵なら追加
-            if (window.game.player.team !== this.ownerTeam && !window.game.player.isDead) targets.push(window.game.player);
-            // 3. 通信相手(rivalPlayer)が敵なら追加
-            if (window.game.rivalPlayer && window.game.rivalPlayer.team !== this.ownerTeam && !window.game.rivalPlayer.isDead) {
-                targets.push(window.game.rivalPlayer);
-            }
+            if (target && !target.isDead && !target.isBailingOut) {
+                const dist = Math.sqrt((target.x - this.x) ** 2 + (target.y - this.y) ** 2);
+                const detectionRange = target.isBagworm ? 150 : 300;
 
-            // 一番近い敵を探す
-            for (const t of targets) {
-                const d = Math.sqrt((t.x - this.x) ** 2 + (t.y - this.y) ** 2);
-                if (d < minDist) { minDist = d; nearest = t; }
-            }
-
-            // 敵が見つかったら、その方向へ角度を少しずつ変える
-            if (nearest) {
-                const targetAngle = Math.atan2(nearest.y - this.y, nearest.x - this.x);
-                let diff = targetAngle - this.angle;
-                while (diff < -Math.PI) diff += Math.PI * 2;
-                while (diff > Math.PI) diff -= Math.PI * 2;
-                this.angle += diff * 0.20; // ここが誘導の強さ
+                if (dist < detectionRange) {
+                    const targetAngle = Math.atan2(target.y - this.y, target.x - this.x);
+                    let diff = targetAngle - this.angle;
+                    while (diff < -Math.PI) diff += Math.PI * 2;
+                    while (diff > Math.PI) diff -= Math.PI * 2;
+                    this.angle += diff * 0.20; // 誘導の強さ
+                }
             }
         }
-        // --- 誘導ロジックここまで ---
 
-        // 通常の移動と寿命の処理
         this.x += Math.cos(this.angle) * this.speed * dt;
         this.y += Math.sin(this.angle) * this.speed * dt;
         this.life -= dt;
@@ -1360,11 +1407,13 @@ class Player {
         this.attackVisualTimer = 0;
         this.aimTimer = 0;
         this.isBagworm = false;
+
+        // --- ここから追加 ---
+        this.selectedSkill = null;
         this.isSkillPrimed = false;
-        // ★追加：スキルのクールダウン管理
-        this.skillTimer = 0;      // 現在の残り待ち時間
+        this.skillTimer = 0;      // クールダウン残り時間
         this.skillCooldown = 15;  // クールダウンの最大値
-        this.skillCharges = 0; // ★追加：スキルの残り使用回数
+        this.skillCharges = 0;    // スキルの残り使用回数
     }
 
     // ★新規メソッド：スキルボタンを押した時の処理
@@ -1386,13 +1435,23 @@ class Player {
         if (this.isSkillPrimed) {
             // ★発動した瞬間にチャージ数をセット（ポジションごとに変えると面白い）
             if (this.config.name === 'Gunner') {
-                this.skillCharges = 8; // ガンナーは多めに連射できる
+                this.skillCharges = 3; // ガンナーは多めに連射できる
+            } else if (this.config.name === 'Sniper') {
+                this.skillCharges = 2;
             } else if (this.config.name === 'Shooter') {
                 this.skillCharges = 5;  // シューターは強力なバースト3回分
             } else if (this.config.name === 'Kogetsu') {
                 this.skillCharges = 1;  // 旋空は今まで通り1回
+            } else if (this.config.name === 'Scorpion') {
+                // ★追加：マンティスは3回分振れるように設定
+                this.skillCharges = 3;
             }
+        } else {
+            // ★追加：手動でOFFにした場合もクールダウンを開始させる
+            this.skillTimer = this.skillCooldown;
+            this.skillCharges = 0;
         }
+
     }
 
     setClass(className) {
@@ -1493,39 +1552,35 @@ class Player {
             const bArr = [];
             this.attackVisualTimer = 0.2;
 
+            // ★スキル状態の判定
+            const isHound = (this.selectedSkill === 'HOUND' && this.isSkillPrimed);
+            const isLead = (this.selectedSkill === 'LEAD_BULLET' && this.isSkillPrimed);
+            const isSenku = (this.selectedSkill === 'SENKU' && this.isSkillPrimed);
+            const isMantis = (this.selectedSkill === 'MANTIS' && this.isSkillPrimed);
+
             if (cfg.name === 'Gunner') {
-                const isHound = (this.selectedSkill === 'HOUND' && this.isSkillPrimed);
-
                 if (isHound) {
-                    // ガンナーハウンド：連射型の誘導弾
-                    bArr.push(new Bullet(this.x, this.y, angle, cfg.bulletSpeed * 0.8, cfg.damage, cfg.range / cfg.bulletSpeed * 1.5, this.team, 'Hound', 4));
-
-                    // ★チャージ消費処理（撃つたびに減らし、0になったらクールダウン）
-                    this.skillCharges--;
-                    if (this.skillCharges <= 0) {
-                        this.isSkillPrimed = false;
-                        this.skillTimer = this.skillCooldown;
-                        this.skillCharges = 0;
-                    }
+                    const bl = new Bullet(this.x, this.y, angle, cfg.bulletSpeed * 0.8, cfg.damage, cfg.range / cfg.bulletSpeed * 1.5, this.team, 'Hound', 4);
+                    bl.ignoreWallTimer = 0.6; bl.initialIgnoreWallTime = 0.6;
+                    bArr.push(bl);
+                    if (!isExternal) this.skillCharges--;
+                } else if (isLead) {
+                    const bl = new Bullet(this.x, this.y, angle, cfg.bulletSpeed * 0.6, 0, cfg.range / cfg.bulletSpeed, this.team, cfg.name, 6);
+                    bl.isLeadBullet = true;
+                    bArr.push(bl);
+                    if (!isExternal) this.skillCharges--;
                 } else {
                     bArr.push(new Bullet(this.x, this.y, angle, cfg.bulletSpeed, cfg.damage, cfg.range / cfg.bulletSpeed, this.team, cfg.name, 4));
                 }
             } else if (cfg.name === 'Shooter') {
-                const isHound = (this.selectedSkill === 'HOUND' && this.isSkillPrimed);
                 if (isHound) {
-                    // シューターハウンド：散弾型の誘導弾
                     for (let i = 0; i < cfg.burst; i++) {
                         const spread = (Math.random() - 0.5) * 0.8;
-                        bArr.push(new Bullet(this.x, this.y, angle + spread, cfg.bulletSpeed * 0.8, cfg.damage, cfg.range / cfg.bulletSpeed * 1.5, this.team, 'Hound', 4));
+                        const bl = new Bullet(this.x, this.y, angle + spread, cfg.bulletSpeed * 0.8, cfg.damage, cfg.range / cfg.bulletSpeed * 1.5, this.team, 'Hound', 4);
+                        bl.ignoreWallTimer = 0.6; bl.initialIgnoreWallTime = 0.6;
+                        bArr.push(bl);
                     }
-
-                    // ★チャージ消費処理
-                    this.skillCharges--;
-                    if (this.skillCharges <= 0) {
-                        this.isSkillPrimed = false;
-                        this.skillTimer = this.skillCooldown;
-                        this.skillCharges = 0;
-                    }
+                    if (!isExternal) this.skillCharges--;
                 } else {
                     for (let i = 0; i < cfg.burst; i++) {
                         const s = (Math.random() - 0.5) * 0.2;
@@ -1533,50 +1588,41 @@ class Player {
                     }
                 }
             } else if (cfg.aimType === 'arc') {
-                // --- アタッカー系の処理 ---
-                if (cfg.name === 'Kogetsu') {
-                    const isSenku = (this.selectedSkill === 'SENKU' && this.isSkillPrimed);
-
+                if (cfg.name === 'Kogetsu' || cfg.name === 'KOGETSU') {
                     const rangeMult = isSenku ? 3 : 1;
                     const actualSpeed = cfg.bulletSpeed * (isSenku ? 1.2 : 1);
-
-                    const bl = new Bullet(
-                        this.x + Math.cos(angle) * 20,
-                        this.y + Math.sin(angle) * 20,
-                        angle,
-                        actualSpeed,
-                        cfg.damage,
-                        (cfg.range * rangeMult) / actualSpeed,
-                        this.team,
-                        isSenku ? 'Senku' : cfg.name,
-                        isSenku ? 24 : 12
-                    );
-                    bl.pierce = isSenku;
-                    bl.isSlash = true;
+                    const bl = new Bullet(this.x + Math.cos(angle) * 20, this.y + Math.sin(angle) * 20, angle, actualSpeed, cfg.damage, (cfg.range * rangeMult) / actualSpeed, this.team, isSenku ? 'Senku' : cfg.name, isSenku ? 24 : 12);
+                    bl.pierce = isSenku; bl.isSlash = true;
                     bArr.push(bl);
-
-                    if (isSenku) {
-                        // ★チャージ消費処理
-                        this.skillCharges--;
-                        if (this.skillCharges <= 0) {
-                            this.isSkillPrimed = false;
-                            this.skillTimer = this.skillCooldown;
-                            this.skillCharges = 0;
-                        }
-                    }
-                } else {
-                    for (let a = -0.6; a <= 0.6; a += 0.3) {
-                        const bl = new Bullet(this.x + Math.cos(angle + a) * 20, this.y + Math.sin(angle + a) * 20, angle + a, cfg.bulletSpeed, cfg.damage, cfg.range / cfg.bulletSpeed, this.team, cfg.name, 12);
-                        bl.pierce = false;
-                        bl.isSlash = true;
+                    if (isSenku && !isExternal) this.skillCharges--;
+                } else if (cfg.name === 'Scorpion' || cfg.name === 'SCORPION') {
+                    const rangeMult = isMantis ? 2.5 : 1.0;
+                    const actualSpeed = cfg.bulletSpeed * (isMantis ? 1.5 : 1.0);
+                    const fanAngle = isMantis ? 0.3 : 0.6;
+                    for (let a = -fanAngle; a <= fanAngle; a += 0.3) {
+                        const bl = new Bullet(this.x + Math.cos(angle + a) * 20, this.y + Math.sin(angle + a) * 20, angle + a, actualSpeed, cfg.damage, (cfg.range * rangeMult) / actualSpeed, this.team, isMantis ? 'Mantis' : cfg.name, 12);
+                        bl.pierce = isMantis; bl.isSlash = true;
                         bArr.push(bl);
                     }
+                    if (isMantis && !isExternal) this.skillCharges--;
                 }
             } else {
-                // --- スナイパーなどの処理 ---
-                bArr.push(new Bullet(this.x, this.y, angle, cfg.bulletSpeed, cfg.damage, cfg.range / cfg.bulletSpeed, this.team, cfg.name, 5));
+                if (isLead) {
+                    const bl = new Bullet(this.x, this.y, angle, cfg.bulletSpeed * 0.5, 0, cfg.range / cfg.bulletSpeed, this.team, cfg.name, 8);
+                    bl.isLeadBullet = true;
+                    bArr.push(bl);
+                    if (!isExternal) this.skillCharges--;
+                } else {
+                    bArr.push(new Bullet(this.x, this.y, angle, cfg.bulletSpeed, cfg.damage, cfg.range / cfg.bulletSpeed, this.team, cfg.name, 5));
+                }
             }
 
+            // チャージが切れたらクールダウンへ
+            if (!isExternal && this.isSkillPrimed && this.skillCharges <= 0) {
+                this.isSkillPrimed = false;
+                this.skillTimer = this.skillCooldown;
+                this.skillCharges = 0;
+            }
             return bArr;
         }
         return null;
@@ -1747,136 +1793,136 @@ class Player {
 }
 
 
-class Bot extends Player {
-    constructor(x, y) { super(x, y); this.patrolTarget = null; this.thinkTimer = 0; this.reactionTimer = 0; }
+// class Bot extends Player {
+//     constructor(x, y) { super(x, y); this.patrolTarget = null; this.thinkTimer = 0; this.reactionTimer = 0; }
 
-    updateAI(dt, map, enemies) {
-        // --- 1. ベイルアウト・死亡時の処理 ---
-        if (this.isDead || this.isBailingOut) {
-            this.isAttacking = false;
-            if (this.isBailingOut) {
-                // 変数名を bailOutTimer (Oが大文字) に統一！
-                this.bailOutTimer -= dt;
-                if (this.bailOutTimer <= 0) {
-                    this.isDead = true;
-                }
-                this.update(dt, 0, 0, map, this.angle, false);
-            }
-            return; // 演出中は以降のAI思考（移動や攻撃）をさせない
-        }
+//     updateAI(dt, map, enemies) {
+//         // --- 1. ベイルアウト・死亡時の処理 ---
+//         if (this.isDead || this.isBailingOut) {
+//             this.isAttacking = false;
+//             if (this.isBailingOut) {
+//                 // 変数名を bailOutTimer (Oが大文字) に統一！
+//                 this.bailOutTimer -= dt;
+//                 if (this.bailOutTimer <= 0) {
+//                     this.isDead = true;
+//                 }
+//                 this.update(dt, 0, 0, map, this.angle, false);
+//             }
+//             return; // 演出中は以降のAI思考（移動や攻撃）をさせない
+//         }
 
-        let nearest = null; let minDist = Infinity;
-        for (const e of enemies) {
-            if (e.isDead || e.hp <= 0 || e.isBailingOut || e.isBagworm) continue;
-            const d = Math.sqrt((e.x - this.x) ** 2 + (e.y - this.y) ** 2);
-            if (d < minDist) { minDist = d; nearest = e; }
-        }
+//         let nearest = null; let minDist = Infinity;
+//         for (const e of enemies) {
+//             if (e.isDead || e.hp <= 0 || e.isBailingOut || e.isBagworm) continue;
+//             const d = Math.sqrt((e.x - this.x) ** 2 + (e.y - this.y) ** 2);
+//             if (d < minDist) { minDist = d; nearest = e; }
+//         }
 
-        let moveX = 0, moveY = 0; let aiAngle = this.angle; this.isAttacking = false;
+//         let moveX = 0, moveY = 0; let aiAngle = this.angle; this.isAttacking = false;
 
-        this.thinkTimer -= dt;
-        if (this.thinkTimer <= 0) {
-            // --- 思考タイミング（0.5〜1秒ごと）の処理 ---
-            this.thinkTimer = 0.5 + Math.random() * 0.5;
+//         this.thinkTimer -= dt;
+//         if (this.thinkTimer <= 0) {
+//             // --- 思考タイミング（0.5〜1秒ごと）の処理 ---
+//             this.thinkTimer = 0.5 + Math.random() * 0.5;
 
-            if (!nearest) {
-                this.patrolTarget = { x: Math.random() * MAP_WIDTH * TILE_SIZE, y: Math.random() * MAP_HEIGHT * TILE_SIZE };
-                this.isShieldingInput = false; // 敵がいなければシールド解除
-            } else {
-                const dist = Math.sqrt((nearest.x - this.x) ** 2 + (nearest.y - this.y) ** 2);
-                // ★シールド判定をここ（タイマー内）に移動！一度決めたら次の思考まで維持する
-                if (this.hp < this.maxHp * 0.4 && dist < this.config.range) {
-                    this.isShieldingInput = Math.random() < 0.6;
-                } else {
-                    this.isShieldingInput = false;
-                }
-            }
-        }
+//             if (!nearest) {
+//                 this.patrolTarget = { x: Math.random() * MAP_WIDTH * TILE_SIZE, y: Math.random() * MAP_HEIGHT * TILE_SIZE };
+//                 this.isShieldingInput = false; // 敵がいなければシールド解除
+//             } else {
+//                 const dist = Math.sqrt((nearest.x - this.x) ** 2 + (nearest.y - this.y) ** 2);
+//                 // ★シールド判定をここ（タイマー内）に移動！一度決めたら次の思考まで維持する
+//                 if (this.hp < this.maxHp * 0.4 && dist < this.config.range) {
+//                     this.isShieldingInput = Math.random() < 0.6;
+//                 } else {
+//                     this.isShieldingInput = false;
+//                 }
+//             }
+//         }
 
-        if (nearest) {
-            const dx = nearest.x - this.x;
-            const dy = nearest.y - this.y;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-            aiAngle = Math.atan2(dy, dx);
+//         if (nearest) {
+//             const dx = nearest.x - this.x;
+//             const dy = nearest.y - this.y;
+//             const dist = Math.sqrt(dx * dx + dy * dy);
+//             aiAngle = Math.atan2(dy, dx);
 
-            // 移動ロジック（ここは維持）
-            if (dist > this.config.range * 0.8) { moveX = dx / dist; moveY = dy / dist; }
-            else if (dist < this.config.range * 0.4) { moveX = -dx / dist; moveY = -dy / dist; }
-            else { moveX = (Math.random() - 0.5); moveY = (Math.random() - 0.5); }
+//             // 移動ロジック（ここは維持）
+//             if (dist > this.config.range * 0.8) { moveX = dx / dist; moveY = dy / dist; }
+//             else if (dist < this.config.range * 0.4) { moveX = -dx / dist; moveY = -dy / dist; }
+//             else { moveX = (Math.random() - 0.5); moveY = (Math.random() - 0.5); }
 
-            const withinRange = dist < this.config.range;
+//             const withinRange = dist < this.config.range;
 
-            // --- ここからが「駆け引き」を生む修正 ---
-            if (withinRange) {
-                // // 1. 攻撃開始の判断：自分がシールドを張っていないなら狙い始める
-                // if (!this.isAttacking && !this.isShieldingInput) {
-                // 反応速度を 0.4〜0.8秒 に設定（ほどよい緊張感）
-                if (this.reactionTimer <= 0) {
-                    this.reactionTimer = 0.4 + Math.random() * 0.4;
-                }
-                this.isAttacking = true;
-                // }
+//             // --- ここからが「駆け引き」を生む修正 ---
+//             if (withinRange) {
+//                 // // 1. 攻撃開始の判断：自分がシールドを張っていないなら狙い始める
+//                 // if (!this.isAttacking && !this.isShieldingInput) {
+//                 // 反応速度を 0.4〜0.8秒 に設定（ほどよい緊張感）
+//                 if (this.reactionTimer <= 0) {
+//                     this.reactionTimer = 0.4 + Math.random() * 0.4;
+//                 }
+//                 this.isAttacking = true;
+//                 // }
 
-                // 2. 相手がシールドを張っている時の挙動
-                // if (this.isAttacking && nearest.isShielding) {
-                //     // 0.005 (約0.5%) の確率で攻撃を辞める
-                //     // 1秒間（60フレーム）撃ち続ける確率は約74%
-                //     // つまり、平均3〜4秒はシールドの上からゴリ押ししてくるようになります！
-                //     if (Math.random() < 0.005) {
-                //         this.isAttacking = false;
-                //         this.reactionTimer = 0;
-                //     }
-                // }
-            } else {
-                // 射程外に出たらリセット
-                this.isAttacking = false;
-                this.reactionTimer = 0;
-            }
-        } else {
-            this.isAttacking = false;
-            this.reactionTimer = 0;
-        }
+//                 // 2. 相手がシールドを張っている時の挙動
+//                 // if (this.isAttacking && nearest.isShielding) {
+//                 //     // 0.005 (約0.5%) の確率で攻撃を辞める
+//                 //     // 1秒間（60フレーム）撃ち続ける確率は約74%
+//                 //     // つまり、平均3〜4秒はシールドの上からゴリ押ししてくるようになります！
+//                 //     if (Math.random() < 0.005) {
+//                 //         this.isAttacking = false;
+//                 //         this.reactionTimer = 0;
+//                 //     }
+//                 // }
+//             } else {
+//                 // 射程外に出たらリセット
+//                 this.isAttacking = false;
+//                 this.reactionTimer = 0;
+//             }
+//         } else {
+//             this.isAttacking = false;
+//             this.reactionTimer = 0;
+//         }
 
-        // 毎フレーム、タイマーを減らす
-        if (this.reactionTimer > 0) this.reactionTimer -= dt;
+//         // 毎フレーム、タイマーを減らす
+//         if (this.reactionTimer > 0) this.reactionTimer -= dt;
 
-        if (this.config.name === 'Sniper' && !nearest && !this.isBagworm && Math.random() < 0.01) this.toggleBagworm(true);
+//         if (this.config.name === 'Sniper' && !nearest && !this.isBagworm && Math.random() < 0.01) this.toggleBagworm(true);
 
-        this.update(dt, moveX, moveY, map, aiAngle, this.isAttacking);
-    }
+//         this.update(dt, moveX, moveY, map, aiAngle, this.isAttacking);
+//     }
 
-    shootAI(enemies) {
-        // 1. そもそも死んでる、または攻撃態勢（isAttacking）でないなら撃たない
-        if (this.isDead || !this.isAttacking || this.reactionTimer > 0) return null;
+//     shootAI(enemies) {
+//         // 1. そもそも死んでる、または攻撃態勢（isAttacking）でないなら撃たない
+//         if (this.isDead || !this.isAttacking || this.reactionTimer > 0) return null;
 
-        // 2. ターゲットを特定（一番近い敵を狙っていると想定）
-        let target = null;
-        let minDist = Infinity;
-        for (const e of enemies) {
-            if (e.isDead || e.hp <= 0 || e.isBailingOut || e.isBagworm) continue;
-            if (e.isBagworm) {
-                const dist = Math.sqrt((e.x - this.x) ** 2 + (e.y - this.y) ** 2);
-                // ★ 150px以上離れていたら、レーダーにも映らず目視もできない
-                if (dist > 150) continue;
-                // 150px以内なら「目視」した判定になり、攻撃対象に入る
-            }
-            const d = Math.sqrt((e.x - this.x) ** 2 + (e.y - this.y) ** 2);
-            if (d < minDist) { minDist = d; target = e; }
-        }
+//         // 2. ターゲットを特定（一番近い敵を狙っていると想定）
+//         let target = null;
+//         let minDist = Infinity;
+//         for (const e of enemies) {
+//             if (e.isDead || e.hp <= 0 || e.isBailingOut || e.isBagworm) continue;
+//             if (e.isBagworm) {
+//                 const dist = Math.sqrt((e.x - this.x) ** 2 + (e.y - this.y) ** 2);
+//                 // ★ 150px以上離れていたら、レーダーにも映らず目視もできない
+//                 if (dist > 150) continue;
+//                 // 150px以内なら「目視」した判定になり、攻撃対象に入る
+//             }
+//             const d = Math.sqrt((e.x - this.x) ** 2 + (e.y - this.y) ** 2);
+//             if (d < minDist) { minDist = d; target = e; }
+//         }
 
-        // --- ★ ここが重要！ ---
-        // ターゲットがシールドを張っていても、関係なく撃たせる。
-        // ただし、スナイパーだけは「無駄撃ち」を嫌って少し慎重にする（原作再現）
-        if (target && target.isShielding) {
-            if (this.config.name === 'Sniper') {
-                // スナイパーは30%の確率でしかシールドを撃たない
-                if (Math.random() > 0.3) return null;
-            }
-            // ガンナーやシューターはシールドの上からでもガンガン撃ってくる！
-        }
+//         // --- ★ ここが重要！ ---
+//         // ターゲットがシールドを張っていても、関係なく撃たせる。
+//         // ただし、スナイパーだけは「無駄撃ち」を嫌って少し慎重にする（原作再現）
+//         if (target && target.isShielding) {
+//             if (this.config.name === 'Sniper') {
+//                 // スナイパーは30%の確率でしかシールドを撃たない
+//                 if (Math.random() > 0.3) return null;
+//             }
+//             // ガンナーやシューターはシールドの上からでもガンガン撃ってくる！
+//         }
 
-        return this.shoot();
-    }
-}
+//         return this.shoot();
+//     }
+// }
 
 

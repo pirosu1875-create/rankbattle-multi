@@ -542,3 +542,104 @@ button,
 .shield-bar.broken {
     background: var(--accent-red) !important;
 }
+
+/* =========================================
+   1対1用：新UIレイアウト（スキル追加版）
+========================================= */
+
+/* 🛡️ 右下のアクションボタン共通設定（シールド＆スキル） */
+.shield-btn,
+#skill-btn {
+    position: absolute;
+    bottom: 10px;
+    width: 75px;
+    height: 75px;
+    border-radius: 50%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    pointer-events: auto;
+    font-weight: 700;
+    font-size: 0.8rem;
+    z-index: 2005;
+}
+
+/* シールドは一番右端 */
+.shield-btn {
+    right: 10px;
+    background: rgba(56, 189, 248, 0.3);
+    border: 2px solid var(--primary);
+}
+
+/* スキルボタンはシールドの左隣 */
+#skill-btn {
+    right: 95px;
+    background: rgba(15, 23, 42, 0.8);
+    border: 2px solid #475569;
+    color: #cbd5e1;
+    transition: all 0.2s ease;
+}
+
+/* 🧥 バッグワームは右上のミニマップ横に独立して配置 */
+.bagworm-btn,
+#bagworm-btn {
+    position: fixed;
+    top: 20px;
+    right: 170px; /* ミニマップの左隣 */
+    width: 60px;
+    height: 60px;
+    border-radius: 8px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    pointer-events: auto;
+    font-weight: 700;
+    font-size: 0.8rem;
+    z-index: 2005;
+    background: rgba(15, 23, 42, 0.8);
+    border: 2px solid #475569;
+    color: #94a3b8;
+    transition: all 0.2s ease;
+}
+
+/* バッグワーム発動中 */
+.bagworm-btn.active,
+#bagworm-btn.active {
+    background: rgba(22, 163, 74, 0.3);
+    border-color: #22c55e;
+    color: #fff;
+    box-shadow: 0 0 15px rgba(34, 197, 94, 0.5);
+}
+
+/* スキルボタンが待機状態（active）になった時の光るエフェクト */
+#skill-btn.active {
+    background: rgba(244, 63, 94, 0.3);
+    border-color: #f43f5e;
+    color: #fff;
+    box-shadow: 0 0 15px rgba(244, 63, 94, 0.8), inset 0 0 10px rgba(244, 63, 94, 0.5);
+    text-shadow: 0 0 5px #fff;
+    transform: scale(1.05);
+}
+
+/* 残弾数表示のコンテナ（念のため） */
+.ammo-dots {
+    display: flex;
+    flex-direction: row;
+    gap: 4px;
+    margin-top: 5px;
+    height: 10px;
+    align-items: center;
+}
+.ammo-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    transition: all 0.3s ease;
+}
+.ammo-dot.filled {
+    background: var(--primary);
+    box-shadow: 0 0 10px var(--primary);
+    border-color: #fff;
+}
