@@ -68,6 +68,14 @@ window.onload = () => {
         // 受信処理の中に追加
         if (data.type === 'apply-damage') {
             gameInstance.player.hp -= payload.damage; // 相手から届いたダメージを自分のHPに適用
+            if (payload.isLeadBullet) {
+                gameInstance.player.speedMultiplier = (gameInstance.player.speedMultiplier || 1.0) * 0.6;
+                gameInstance.player.weightTimer = 5.0;
+                // 黒い火花代わりのエフェクト
+                if (gameInstance.spawnBagwormEffect) {
+                    gameInstance.spawnBagwormEffect(gameInstance.player.x, gameInstance.player.y, 'activate');
+                }
+            }
             if (gameInstance.player.hp <= 0 && !gameInstance.player.isDead && !gameInstance.player.isBailingOut) {
                 gameInstance.player.startBailOut(); // 0以下になったら自分をベイルアウトさせる
             }
@@ -999,11 +1007,44 @@ class Game {
         //     if (bullets) this.bullets.push(...bullets);
         // }
 
-        // 5. 弾の更新と当たり判定（ここをこの1つのブロックだけにしてください）
         // --- 5. 弾の更新と当たり判定（ここから） ---
         for (let i = this.bullets.length - 1; i >= 0; i--) {
             const bul = this.bullets[i];
             bul.update(dt);
+
+            // ★追加：壁との判定 (ハウンドの壁越えタイマーを考慮)
+            const canHitWall = !bul.pierce && bul.ignoreWallTimer <= 0;
+            let hitWall = canHitWall && bul.checkWallCollision(this.map);
+
+            // ★追加：旋空の壁破壊処理
+            if (bul.ownerClass === 'Senku') {
+                const r = bul.size;
+                const startX = Math.max(1, Math.floor((bul.x - r) / TILE_SIZE));
+                const endX = Math.min(this.map.width - 2, Math.floor((bul.x + r) / TILE_SIZE));
+                const startY = Math.max(1, Math.floor((bul.y - r) / TILE_SIZE));
+                const endY = Math.min(this.map.height - 2, Math.floor((bul.y + r) / TILE_SIZE));
+
+                for (let y = startY; y <= endY; y++) {
+                    for (let x = startX; x <= endX; x++) {
+                        if (this.map.data[y][x] === 1) {
+                            const cx = x * TILE_SIZE + TILE_SIZE / 2;
+                            const cy = y * TILE_SIZE + TILE_SIZE / 2;
+                            if (Math.sqrt((cx - bul.x) ** 2 + (cy - bul.y) ** 2) <= r) {
+                                this.map.data[y][x] = 0;
+                                for (let k = 0; k < 4; k++) {
+                                    this.effects.push({
+                                        type: 'trion_cube',
+                                        x: cx + (Math.random() - 0.5) * TILE_SIZE,
+                                        y: cy + (Math.random() - 0.5) * TILE_SIZE,
+                                        vx: (Math.random() - 0.5) * 120, vy: (Math.random() - 0.5) * 120,
+                                        life: 0.5, size: 4 + Math.random() * 4
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
 
             let hit = false;
             // 自分(player)が撃った弾か、相手(rivalPlayer)が撃った弾かを判定
@@ -1019,19 +1060,28 @@ class Game {
                         let finalDamage = bul.damage;
                         if (t.isBagworm) t.toggleBagworm(false);
 
-                        // シールド判定
-                        if (t.isShielding && !t.isBroken && t.checkShield(bul.angle)) {
-                            finalDamage = bul.damage * 0.1; // 9割カット
+                        // ★追加：鉛弾とシールドの処理
+                        if (bul.isLeadBullet) {
+                            finalDamage = 0; // 鉛弾はダメージ0
+                            t.speedMultiplier *= 0.6; // 画面上の相手アバターを減速
+                            t.weightTimer = 5.0;
+                            this.spawnBagwormEffect(t.x, t.y, 'activate');
+                        } else {
+                            // 通常のシールド判定
+                            if (t.isShielding && !t.isBroken && t.checkShield(bul.angle)) {
+                                finalDamage = bul.damage * 0.1; // 9割カット
+                            }
                         }
 
-                        // 自分の画面上の相手のHPを減らす（即座に反映させるため）
+                        // 自分の画面上の相手のHPを減らす
                         t.hp -= finalDamage;
 
-                        // 相手にダメージ確定を通知
+                        // ★追加：相手にダメージと鉛弾フラグを通信で確定通知
                         if (window.network) {
                             window.network.sendData('apply-damage', {
                                 damage: finalDamage,
-                                from: this.player.team
+                                from: this.player.team,
+                                isLeadBullet: bul.isLeadBullet // 鉛弾フラグを乗せる
                             });
                         }
 
@@ -1047,8 +1097,8 @@ class Game {
                 }
             }
 
-            // 壁衝突または寿命、またはヒットした弾を消去
-            if (hit || bul.life <= 0 || (!bul.pierce && bul.checkWallCollision(this.map))) {
+            // ★修正：壁衝突(hitWall)を利用して弾を消滅させる
+            if (hit || bul.life <= 0 || hitWall) {
                 this.bullets.splice(i, 1);
             }
         }
@@ -1338,6 +1388,7 @@ class Bullet {
         this.isLeadBullet = false;
     }
     update(dt) {
+        if (this.ignoreWallTimer > 0) this.ignoreWallTimer -= dt;
         // --- ハウンド(誘導弾) 1対1専用の追尾ロジック ---
         if (this.ownerClass === 'Hound' && window.game) {
             // 敵は常に自分とは違うチームの相手
@@ -1394,34 +1445,34 @@ class Bullet {
             ctx.translate(drawX, drawY);
             ctx.rotate(this.angle);
 
+            // ★巨大な仮想円の中心を後ろ(-radius)にずらすことで、扇形のインジケーターにぴったり合う三日月を作る
             if (this.ownerClass === 'Kogetsu' || this.ownerClass === 'Senku') {
                 const isSenku = this.ownerClass === 'Senku';
-                // インジケーターの角度と同じ広がり(arcSpread)にする
-                const radius = isSenku ? 25 : 15;
-                const arcSpread = isSenku ? 0.6 : 0.5;
+                const radius = isSenku ? 390 : 130;  // ★射程(range)と完全一致させる
+                const arcSpread = isSenku ? 0.6 : 0.5; // インジケーターの角度と完全一致
 
                 ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
-                ctx.lineWidth = isSenku ? 30 : 20;
+                ctx.lineWidth = isSenku ? 30 : 15;
                 ctx.lineCap = 'round';
                 ctx.shadowBlur = isSenku ? 30 : 15;
                 ctx.shadowColor = '#fff';
 
                 ctx.beginPath();
-                ctx.arc(0, 0, radius, -arcSpread, arcSpread);
+                ctx.arc(-radius, 0, radius, -arcSpread, arcSpread);
                 ctx.stroke();
 
                 ctx.shadowBlur = 0;
                 ctx.strokeStyle = '#ffffff';
-                ctx.lineWidth = isSenku ? 10 : 6;
+                ctx.lineWidth = isSenku ? 10 : 5;
 
                 ctx.beginPath();
-                ctx.arc(0, 0, radius, -arcSpread, arcSpread);
+                ctx.arc(-radius, 0, radius, -arcSpread, arcSpread);
                 ctx.stroke();
 
             } else if (this.ownerClass === 'Mantis') {
-                // マンティス：長く鋭い赤い閃光
-                const radius = 10;
-                const arcSpread = 0.3;
+                const radius = 275; // 射程(110 * 2.5)に一致
+                const arcSpread = 0.3; // マンティスの角度
+
                 ctx.strokeStyle = '#f43f5e';
                 ctx.lineWidth = 20;
                 ctx.lineCap = 'round';
@@ -1429,28 +1480,31 @@ class Bullet {
                 ctx.shadowColor = '#f43f5e';
 
                 ctx.beginPath();
-                ctx.arc(0, 0, radius, -arcSpread, arcSpread);
+                ctx.arc(-radius, 0, radius, -arcSpread, arcSpread);
                 ctx.stroke();
 
                 ctx.strokeStyle = '#ffffff';
                 ctx.lineWidth = 6;
+                ctx.beginPath();
+                ctx.arc(-radius, 0, radius, -arcSpread, arcSpread);
                 ctx.stroke();
 
             } else {
-                // 通常スコーピオン：散らばった各弾に小さな刃
-                const radius = 5;
+                // 通常スコーピオン
+                const radius = 110; // 射程に一致
+                const arcSpread = 0.6; // インジケーターの角度
+
                 ctx.strokeStyle = '#e5e58aff';
-                ctx.lineWidth = 8;
+                ctx.lineWidth = 10;
                 ctx.lineCap = 'round';
 
                 ctx.beginPath();
-                ctx.arc(0, 0, radius, -0.3, 0.3);
+                ctx.arc(-radius, 0, radius, -arcSpread, arcSpread);
                 ctx.stroke();
 
                 ctx.shadowBlur = 5;
                 ctx.shadowColor = '#38bdf8';
             }
-
             ctx.restore();
         } else {
             ctx.save();
@@ -1506,6 +1560,8 @@ class Player {
         this.skillTimer = 0;      // クールダウン残り時間
         this.skillCooldown = 15;  // クールダウンの最大値
         this.skillCharges = 0;    // スキルの残り使用回数
+        this.speedMultiplier = 1.0;
+        this.weightTimer = 0;
     }
 
     // ★新規メソッド：スキルボタンを押した時の処理
@@ -1565,6 +1621,12 @@ class Player {
     }
     update(dt, ix, iy, map, aimAngle, isAttacking) {
         if (this.isDead) return;
+        if (this.weightTimer > 0) {
+            this.weightTimer -= dt;
+            if (this.weightTimer <= 0) {
+                this.speedMultiplier = 1.0; // 時間経過で元の速さに戻る
+            }
+        }
         // 毎フレーム、クールダウンタイマーを減らす
         if (this.skillTimer > 0) {
             this.skillTimer -= dt;
@@ -1600,7 +1662,7 @@ class Player {
         if (this.attackVisualTimer > 0) this.attackVisualTimer -= dt;
         this.isMoving = (ix !== 0 || iy !== 0);
 
-        let currentSpeed = this.speed;
+        let currentSpeed = this.speed * this.speedMultiplier;
         if (this.isShielding) {
             currentSpeed *= this.config.shieldSpeedMult || 0.8;
             if (this.sp <= 0) { this.sp = 0; this.isBroken = true; this.brokenTimer = 5; this.isShielding = false; }
@@ -1686,14 +1748,13 @@ class Player {
                     const rangeMult = isSenku ? 3 : 1;
                     const actualSpeed = cfg.bulletSpeed * (isSenku ? 1.2 : 1);
                     const fanAngle = isSenku ? 0.6 : 0.5; // インジケーターと同じ角度
-                    const step = isSenku ? 0.2 : 0.25;    // 隙間なく当たるように弾を敷き詰める
+                    const step = isSenku ? 0.2 : 0.25;
 
                     for (let a = -fanAngle; a <= fanAngle + 0.01; a += step) {
                         const bl = new Bullet(this.x + Math.cos(angle + a) * 20, this.y + Math.sin(angle + a) * 20, angle + a, actualSpeed, cfg.damage, (cfg.range * rangeMult) / actualSpeed, this.team, isSenku ? 'Senku' : cfg.name, isSenku ? 24 : 16);
                         bl.pierce = isSenku; bl.isSlash = true;
 
-                        // 中央の弾だけエフェクトを描画し、両脇の弾は当たり判定のみ（透明）にする
-                        bl.invisible = Math.abs(a) > 0.05;
+                        bl.invisible = Math.abs(a) > 0.05; // 中心だけ描画
                         bArr.push(bl);
                     }
                     if (isSenku && !isExternal) this.skillCharges--;
@@ -1701,15 +1762,15 @@ class Player {
                 } else if (cfg.name === 'Scorpion' || cfg.name === 'SCORPION') {
                     const rangeMult = isMantis ? 2.5 : 1.0;
                     const actualSpeed = cfg.bulletSpeed * (isMantis ? 1.5 : 1.0);
-                    const fanAngle = isMantis ? 0.3 : 0.6;
+                    const fanAngle = isMantis ? 0.3 : 0.6; // インジケーターと同じ角度
                     const step = isMantis ? 0.15 : 0.2;
 
                     for (let a = -fanAngle; a <= fanAngle + 0.01; a += step) {
                         const bl = new Bullet(this.x + Math.cos(angle + a) * 20, this.y + Math.sin(angle + a) * 20, angle + a, actualSpeed, cfg.damage, (cfg.range * rangeMult) / actualSpeed, this.team, isMantis ? 'Mantis' : cfg.name, 12);
                         bl.pierce = isMantis; bl.isSlash = true;
 
-                        // マンティスは中央のみ描画、通常スコーピオンは細かい刃を全弾描画
-                        bl.invisible = isMantis ? (Math.abs(a) > 0.05) : false;
+                        // ★修正：スコーピオンもマンティスも、描画するのは中心の1つだけにする
+                        bl.invisible = Math.abs(a) > 0.05;
                         bArr.push(bl);
                     }
                     if (isMantis && !isExternal) this.skillCharges--;
