@@ -154,6 +154,8 @@ window.onload = () => {
             p.isShieldingInput = payload.isShielding;
             p.isShielding = payload.isShielding;
             p.isBagworm = payload.isBagworm;
+            p.selectedSkill = payload.selectedSkill;
+            p.isSkillPrimed = payload.isSkillPrimed;
         }
 
         // --- 5. 弾の同期 ---
@@ -852,8 +854,38 @@ class Game {
         else if (this.rightStick.active && this.rightStick.pointerId === e.pointerId) this.rightStick.move(pos.x, pos.y);
     }
 
+    // --- ★ 新規追加：弾を発射して通信する共通メソッド ---
+    executePlayerShoot(shootAngle) {
+        if (this.player.hp <= 0 || this.player.isDead || this.player.isBailingOut) return;
+        if (this.isShieldingInput) return; // シールド中は撃てない
+
+        if (this.player.isBagworm) this.player.toggleBagworm(false);
+
+        const bullets = this.player.shootWithAngle(shootAngle);
+        if (bullets) {
+            this.bullets.push(...bullets);
+            window.network.sendData('bullet-shot', {
+                x: this.player.x,
+                y: this.player.y,
+                angle: shootAngle,
+                className: this.player.config.name.toUpperCase(),
+                selectedSkill: this.player.selectedSkill,
+                isSkillPrimed: this.player.isSkillPrimed
+            });
+        }
+    }
+
+    // --- ★ 修正：PCのクリック離し対応版 ---
     handlePointerUp(e) {
         if (this.state !== 'playing') return;
+
+        // ★追加：PC（マウス）の左クリックを離した時の処理
+        if (e.pointerType === 'mouse' && e.button === 0) {
+            // マウスカーソルの方向（現在のプレイヤーの角度）に向けて発射！
+            this.executePlayerShoot(this.player.angle);
+            return;
+        }
+
         if (this.leftStick.pointerId === e.pointerId) {
             this.leftStick.deactivate();
         } else if (this.rightStick.pointerId === e.pointerId) {
@@ -862,8 +894,6 @@ class Game {
                 const maxDist = this.rightStick.maxDistReached;
 
                 if (this.player.hp > 0 && !this.player.isDead && !this.player.isBailingOut) {
-                    if (this.player.isBagworm) this.player.toggleBagworm(false);
-
                     let shootAngle = this.player.angle;
                     let shouldShoot = false;
 
@@ -879,20 +909,9 @@ class Game {
                         shouldShoot = true;
                     }
 
+                    // ★修正：新しく作ったメソッドを呼ぶ
                     if (shouldShoot) {
-                        const bullets = this.player.shootWithAngle(shootAngle);
-                        if (bullets) {
-                            this.bullets.push(...bullets);
-                            // ★【重要】ここで一括して相手にデータを送る！
-                            window.network.sendData('bullet-shot', {
-                                x: this.player.x,
-                                y: this.player.y,
-                                angle: shootAngle,
-                                className: this.player.config.name.toUpperCase(),
-                                selectedSkill: this.player.selectedSkill,
-                                isSkillPrimed: this.player.isSkillPrimed // スキル状態も忘れずに
-                            });
-                        }
+                        this.executePlayerShoot(shootAngle);
                     }
                 }
             }
@@ -971,10 +990,14 @@ class Game {
         const mWorldY = (this.mousePos.y / this.zoom) + this.camera.y;
 
         let playerAimAngle = this.player.angle;
-        if (this.isMouseDown || this.rightStick.active || this.isShieldingInput) {
-            if (this.rightStick.active) playerAimAngle = this.rightStick.angle;
-            else if (this.isMouseDown) playerAimAngle = Math.atan2(mWorldY - this.player.y, mWorldX - this.player.x);
+        if (this.rightStick.active) {
+            // スマホ：右スティック（攻撃またはシールドボタンのドラッグ）操作時
+            playerAimAngle = this.rightStick.angle;
+        } else if (this.isMouseDown || this.isShieldingInput) {
+            // PC：左クリック(攻撃) または 右クリック(シールド) をしている時は、常にマウスの方を向く！
+            playerAimAngle = Math.atan2(mWorldY - this.player.y, mWorldX - this.player.x);
         } else if (ix !== 0 || iy !== 0) {
+            // どちらも操作しておらず、移動だけしている時は移動方向を向く
             playerAimAngle = Math.atan2(iy, ix);
         }
 
@@ -984,18 +1007,18 @@ class Game {
             const isTryingToAim = (this.isMouseDown || (this.rightStick.active && this.rightStick.purpose === 'aim'));
             this.player.update(dt, ix, iy, this.map, playerAimAngle, isTryingToAim);
 
-            if (this.isMouseDown && !this.rightStick.active && !this.isShieldingInput && !this.player.isBailingOut) {
-                const b = this.player.shoot();
-                if (b) this.bullets.push(...b);
-                window.network.sendData('bullet-shot', {
-                    x: this.player.x,
-                    y: this.player.y,
-                    angle: this.player.angle,
-                    className: this.player.config.name.toUpperCase(),
-                    selectedSkill: this.player.selectedSkill,
-                    isSkillPrimed: this.player.isSkillPrimed
-                });
-            }
+            // if (this.isMouseDown && !this.rightStick.active && !this.isShieldingInput && !this.player.isBailingOut) {
+            //     const b = this.player.shoot();
+            //     if (b) this.bullets.push(...b);
+            //     window.network.sendData('bullet-shot', {
+            //         x: this.player.x,
+            //         y: this.player.y,
+            //         angle: this.player.angle,
+            //         className: this.player.config.name.toUpperCase(),
+            //         selectedSkill: this.player.selectedSkill,
+            //         isSkillPrimed: this.player.isSkillPrimed
+            //     });
+            // }
         }
         if (this.rivalPlayer && !this.rivalPlayer.isDead) {
             this.rivalPlayer.update(dt, 0, 0, this.map, this.rivalPlayer.angle, this.rivalPlayer.isAttacking);
@@ -1125,7 +1148,10 @@ class Game {
                 angle: this.player.angle,
                 isAttacking: this.player.isAttacking,
                 isShielding: this.player.isShielding,
-                isBagworm: this.player.isBagworm
+                isBagworm: this.player.isBagworm,
+                // ↓この2行を追加して、構え状態を常に同期する
+                selectedSkill: this.player.selectedSkill,
+                isSkillPrimed: this.player.isSkillPrimed
             });
         }
 
