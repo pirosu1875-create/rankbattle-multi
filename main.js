@@ -88,10 +88,9 @@ window.onload = () => {
             gameInstance.rivalPlayer.team = network.isHost ? 'red' : 'blue';
 
             // ホストの場合のみ、自分が準備完了ならカウントダウン開始＆ゲストに合図
-            if (network.isHost && gameInstance.playerReady) {
-                console.log("【ホスト】相手の準備完了を受信。カウントダウンを開始します。");
-                network.sendData('trigger-countdown', {});
-                gameInstance.startCountdown();
+            // ▼▼▼ 変更部分：ホストなら判定専用メソッドを呼ぶだけにする ▼▼▼
+            if (network.isHost) {
+                gameInstance.checkAndStartCountdown();
             }
         }
 
@@ -484,15 +483,7 @@ class Game {
             <p id="waiting-msg" style="font-size:0.8rem; opacity:0.6;">相手の準備を待っています...</p>
         </div>
     `;
-                        // 自分が「後出し」だった場合、この瞬間に rivalReady は true になっているはずなので開始
-                        // 自分が「先出し」だった場合、ここでは何もしない（後から来る network.onDataReceived が開始してくれる）
-                        if (window.network.isHost && this.rivalReady) {
-                            console.log("【ホスト】両者準備完了。カウントダウンを開始します。");
-                            window.network.sendData('trigger-countdown', {});
-                            this.startCountdown();
-                        } else {
-                            console.log("ホストの開始合図、または相手の準備を待機します...");
-                        }
+                        this.checkAndStartCountdown();
 
                     });
 
@@ -507,6 +498,18 @@ class Game {
                 classStep.classList.remove('hidden');
                 tempClass = null;
             });
+        }
+    }
+
+    // --- 新規追加：両者準備完了を判定する専用メソッド ---
+    checkAndStartCountdown() {
+        // 自分がホストであり、かつ「自分」も「相手」も準備完了ならスタート！
+        if (window.network && window.network.isHost && this.playerReady && this.rivalReady) {
+            console.log("【ホスト】両者準備完了！カウントダウンを開始します。");
+            window.network.sendData('trigger-countdown', {});
+            this.startCountdown();
+        } else {
+            console.log("【状態確認】待機中... (自分準備済:", this.playerReady, " 相手準備済:", this.rivalReady, ")");
         }
     }
 
