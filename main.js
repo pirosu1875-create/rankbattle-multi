@@ -1368,6 +1368,9 @@ class Bullet {
         return Math.sqrt(dx * dx + dy * dy) < ent.size / 2 + this.size;
     }
     render(ctx) {
+        // ★追加：透明フラグが立っている弾（当たり判定専用の補助弾）は描画しない
+        if (this.invisible) return;
+
         let drawX = this.x;
         let drawY = this.y;
         let currentSize = this.size;
@@ -1377,103 +1380,108 @@ class Bullet {
             const progress = 1 - (this.ignoreWallTimer / this.initialIgnoreWallTime);
             const jumpHeight = Math.sin(progress * Math.PI) * 50;
 
-            // ① 影を描画 (地面の位置)
             ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
             ctx.beginPath();
             ctx.arc(this.x, this.y, this.size * 0.8, 0, Math.PI * 2);
             ctx.fill();
 
-            // ② 描画用の座標とサイズを更新
             drawY = this.y - jumpHeight;
             currentSize = this.size * (1 + (jumpHeight / 100));
         }
+
         if (this.isSlash) {
             ctx.save();
             ctx.translate(drawX, drawY);
             ctx.rotate(this.angle);
 
             if (this.ownerClass === 'Kogetsu' || this.ownerClass === 'Senku') {
-                // ★ 3vs3の迫力ある大きな描画サイズに戻す
                 const isSenku = this.ownerClass === 'Senku';
-                const radius = isSenku ? 60 : 35; // 旋空は巨大（60）、通常弧月も大きめ（35）
+                // インジケーターの角度と同じ広がり(arcSpread)にする
+                const radius = isSenku ? 25 : 15;
+                const arcSpread = isSenku ? 0.6 : 0.5;
 
                 ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
-                ctx.lineWidth = isSenku ? 20 : 12;
+                ctx.lineWidth = isSenku ? 30 : 20;
                 ctx.lineCap = 'round';
-                ctx.shadowBlur = isSenku ? 40 : 25;
+                ctx.shadowBlur = isSenku ? 30 : 15;
                 ctx.shadowColor = '#fff';
 
                 ctx.beginPath();
-                ctx.arc(0, 0, radius, -1, 1);
+                ctx.arc(0, 0, radius, -arcSpread, arcSpread);
                 ctx.stroke();
 
                 ctx.shadowBlur = 0;
                 ctx.strokeStyle = '#ffffff';
-                ctx.lineWidth = isSenku ? 8 : 4;
+                ctx.lineWidth = isSenku ? 10 : 6;
 
                 ctx.beginPath();
-                ctx.arc(0, 0, radius, -1, 1);
+                ctx.arc(0, 0, radius, -arcSpread, arcSpread);
                 ctx.stroke();
 
             } else if (this.ownerClass === 'Mantis') {
-                // --- マンティス：長く鋭い赤い閃光 ---
-                const radius = 45; // マンティスも鋭く長く描画
+                // マンティス：長く鋭い赤い閃光
+                const radius = 10;
+                const arcSpread = 0.3;
                 ctx.strokeStyle = '#f43f5e';
-                ctx.lineWidth = 5;
+                ctx.lineWidth = 20;
                 ctx.lineCap = 'round';
                 ctx.shadowBlur = 20;
                 ctx.shadowColor = '#f43f5e';
 
                 ctx.beginPath();
-                ctx.arc(0, 0, radius, -0.5, 0.5);
+                ctx.arc(0, 0, radius, -arcSpread, arcSpread);
+                ctx.stroke();
+
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 6;
                 ctx.stroke();
 
             } else {
-                // --- スコーピオン：青緑の素早い刃 ---
-                const radius = 24; // 通常スコーピオン
+                // 通常スコーピオン：散らばった各弾に小さな刃
+                const radius = 5;
                 ctx.strokeStyle = '#e5e58aff';
-                ctx.lineWidth = 4;
+                ctx.lineWidth = 8;
+                ctx.lineCap = 'round';
+
                 ctx.beginPath();
-                ctx.arc(0, 0, radius, -1, 1);
+                ctx.arc(0, 0, radius, -0.3, 0.3);
+                ctx.stroke();
 
                 ctx.shadowBlur = 5;
                 ctx.shadowColor = '#38bdf8';
             }
 
-            ctx.stroke();
             ctx.restore();
         } else {
-            // ▼▼▼ ここから書き換える ▼▼▼
-            ctx.save(); // ハウンドの光が他の弾にうつらないようにする
+            ctx.save();
             if (this.isLeadBullet) {
-                // --- 鉛弾（レッドバレッド）の描画 ---
-                ctx.fillStyle = '#111111'; // 真っ黒
+                // --- 鉛弾（レッドバレット） ---
+                ctx.fillStyle = '#111111';
                 ctx.shadowBlur = 15;
                 ctx.shadowColor = '#000000';
                 ctx.beginPath();
                 ctx.arc(drawX, drawY, currentSize * 1.8, 0, Math.PI * 2);
                 ctx.fill();
 
-                // 中心に少しハイライト
                 ctx.fillStyle = '#333333';
                 ctx.beginPath();
                 ctx.arc(drawX, drawY, currentSize * 0.5, 0, Math.PI * 2);
                 ctx.fill();
-            } else
-                if (this.ownerClass === 'Hound') {
-                    // ハウンド専用の描画（紫色に光らせる）
-                    ctx.fillStyle = '#75cf89ff';
-                    ctx.shadowBlur = 12;
-                    ctx.shadowColor = '#86e981ff';
-
-                    // 【おまけ】少し弾を大きく見せると強そうです
-                    ctx.beginPath();
-                    ctx.arc(drawX, drawY, currentSize * 1.5, 0, Math.PI * 2);
-                    ctx.fill();
-                } else {
-                    ctx.fillStyle = this.ownerTeam === 'blue' ? '#c3eabcff' : '#f43f5e';
-                    ctx.beginPath(); ctx.arc(drawX, drawY, currentSize, 0, Math.PI * 2); ctx.fill();
-                }
+            } else if (this.ownerClass === 'Hound') {
+                // --- ハウンド ---
+                ctx.fillStyle = '#75cf89ff';
+                ctx.shadowBlur = 12;
+                ctx.shadowColor = '#86e981ff';
+                ctx.beginPath();
+                ctx.arc(drawX, drawY, currentSize * 1.5, 0, Math.PI * 2);
+                ctx.fill();
+            } else {
+                // --- 通常弾 ---
+                ctx.fillStyle = this.ownerTeam === 'blue' ? '#c3eabcff' : '#f43f5e';
+                ctx.beginPath();
+                ctx.arc(drawX, drawY, currentSize, 0, Math.PI * 2);
+                ctx.fill();
+            }
             ctx.restore();
         }
     }
@@ -1677,17 +1685,31 @@ class Player {
                 if (cfg.name === 'Kogetsu' || cfg.name === 'KOGETSU') {
                     const rangeMult = isSenku ? 3 : 1;
                     const actualSpeed = cfg.bulletSpeed * (isSenku ? 1.2 : 1);
-                    const bl = new Bullet(this.x + Math.cos(angle) * 20, this.y + Math.sin(angle) * 20, angle, actualSpeed, cfg.damage, (cfg.range * rangeMult) / actualSpeed, this.team, isSenku ? 'Senku' : cfg.name, isSenku ? 24 : 12);
-                    bl.pierce = isSenku; bl.isSlash = true;
-                    bArr.push(bl);
+                    const fanAngle = isSenku ? 0.6 : 0.5; // インジケーターと同じ角度
+                    const step = isSenku ? 0.2 : 0.25;    // 隙間なく当たるように弾を敷き詰める
+
+                    for (let a = -fanAngle; a <= fanAngle + 0.01; a += step) {
+                        const bl = new Bullet(this.x + Math.cos(angle + a) * 20, this.y + Math.sin(angle + a) * 20, angle + a, actualSpeed, cfg.damage, (cfg.range * rangeMult) / actualSpeed, this.team, isSenku ? 'Senku' : cfg.name, isSenku ? 24 : 16);
+                        bl.pierce = isSenku; bl.isSlash = true;
+
+                        // 中央の弾だけエフェクトを描画し、両脇の弾は当たり判定のみ（透明）にする
+                        bl.invisible = Math.abs(a) > 0.05;
+                        bArr.push(bl);
+                    }
                     if (isSenku && !isExternal) this.skillCharges--;
+
                 } else if (cfg.name === 'Scorpion' || cfg.name === 'SCORPION') {
                     const rangeMult = isMantis ? 2.5 : 1.0;
                     const actualSpeed = cfg.bulletSpeed * (isMantis ? 1.5 : 1.0);
                     const fanAngle = isMantis ? 0.3 : 0.6;
-                    for (let a = -fanAngle; a <= fanAngle; a += 0.3) {
+                    const step = isMantis ? 0.15 : 0.2;
+
+                    for (let a = -fanAngle; a <= fanAngle + 0.01; a += step) {
                         const bl = new Bullet(this.x + Math.cos(angle + a) * 20, this.y + Math.sin(angle + a) * 20, angle + a, actualSpeed, cfg.damage, (cfg.range * rangeMult) / actualSpeed, this.team, isMantis ? 'Mantis' : cfg.name, 12);
                         bl.pierce = isMantis; bl.isSlash = true;
+
+                        // マンティスは中央のみ描画、通常スコーピオンは細かい刃を全弾描画
+                        bl.invisible = isMantis ? (Math.abs(a) > 0.05) : false;
                         bArr.push(bl);
                     }
                     if (isMantis && !isExternal) this.skillCharges--;
@@ -1822,7 +1844,7 @@ class Player {
         }
 
         // エイムインジケーター（射線）の描画
-        let showIndicator = this.isAttacking && !this.isBagworm;
+        let showIndicator = this.isAttacking && (!this.isBagworm || this.isControlPlayer);
         let indicatorColor = cfg.color + '66';
         if (isEnemy) {
             if (cfg.name === 'Sniper' && this.aimTimer > 0.5) indicatorColor = '#f43f5e';
@@ -1835,23 +1857,21 @@ class Player {
 
             if (cfg.aimType === 'arc') {
                 // --- 孤月・スコーピオンの扇形インジケーター ---
-
-                // 旋空スキルが「発動待機中」かどうかを正しく判定
                 const isSenku = (cfg.name === 'Kogetsu' && this.selectedSkill === 'SENKU' && this.isSkillPrimed);
                 const isMantis = (cfg.name === 'Scorpion' && this.selectedSkill === 'MANTIS' && this.isSkillPrimed);
 
-                // ★ ここで射程の倍率と扇の角度を同期させる
+                // ★発射処理(shootWithAngle)と同じ角度(fanAngle)に合わせる
                 let rangeMult = 1;
-                let fanAngle = 0.6; // スコーピオンのデフォルト
+                let fanAngle = 0.5; // 弧月のデフォルト
 
                 if (isSenku) {
                     rangeMult = 3;
-                    fanAngle = 1;
+                    fanAngle = 0.6;
                 } else if (isMantis) {
-                    rangeMult = 2.5; // shootWithAngle で設定した値と同じにする
-                    fanAngle = 0.3;  // shootWithAngle で設定した値と同じにする
-                } else if (cfg.name === 'Kogetsu') {
-                    fanAngle = 1;    // 弧月のデフォルト
+                    rangeMult = 2.5;
+                    fanAngle = 0.3;
+                } else if (cfg.name === 'Scorpion') {
+                    fanAngle = 0.6;
                 }
 
                 ctx.beginPath();
