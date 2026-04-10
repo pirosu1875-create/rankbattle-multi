@@ -1383,11 +1383,10 @@ class Bullet {
             ctx.translate(drawX, drawY);
             ctx.rotate(this.angle);
 
-            // --- Bullet クラスの render 内 ---
             if (this.ownerClass === 'Kogetsu' || this.ownerClass === 'Senku') {
-                // 固定数字を消して、弾が持つ本来のサイズ(this.size)で描くようにします
-                const radius = currentSize;
+                // ★ 3vs3の迫力ある大きな描画サイズに戻す
                 const isSenku = this.ownerClass === 'Senku';
+                const radius = isSenku ? 60 : 35; // 旋空は巨大（60）、通常弧月も大きめ（35）
 
                 ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
                 ctx.lineWidth = isSenku ? 20 : 12;
@@ -1406,8 +1405,10 @@ class Bullet {
                 ctx.beginPath();
                 ctx.arc(0, 0, radius, -1, 1);
                 ctx.stroke();
+
             } else if (this.ownerClass === 'Mantis') {
                 // --- マンティス：長く鋭い赤い閃光 ---
+                const radius = 45; // マンティスも鋭く長く描画
                 ctx.strokeStyle = '#f43f5e';
                 ctx.lineWidth = 5;
                 ctx.lineCap = 'round';
@@ -1415,15 +1416,16 @@ class Bullet {
                 ctx.shadowColor = '#f43f5e';
 
                 ctx.beginPath();
-                ctx.arc(0, 0, currentSize, -0.5, 0.5); // 鋭い弧を描く
+                ctx.arc(0, 0, radius, -0.5, 0.5);
                 ctx.stroke();
+
             } else {
                 // --- スコーピオン：青緑の素早い刃 ---
+                const radius = 24; // 通常スコーピオン
                 ctx.strokeStyle = '#e5e58aff';
                 ctx.lineWidth = 4;
                 ctx.beginPath();
-                // スコーピオンは手元で振り回すイメージなので半径は小さめ（16）
-                ctx.arc(0, 0, 16, -1, 1);
+                ctx.arc(0, 0, radius, -1, 1);
 
                 ctx.shadowBlur = 5;
                 ctx.shadowColor = '#38bdf8';
