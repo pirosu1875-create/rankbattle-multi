@@ -9,6 +9,19 @@ class NetworkManager {
 
         // Game.js に「データが届いたよ！」と知らせるためのコールバック関数
         this.onDataReceived = null;
+
+        // ▼▼▼ 追加：Googleの無料STUNサーバーの設定 ▼▼▼
+        this.peerConfig = {
+            config: {
+                'iceServers': [
+                    { urls: 'stun:stun.l.google.com:19302' },
+                    { urls: 'stun:stun1.l.google.com:19302' },
+                    { urls: 'stun:stun2.l.google.com:19302' },
+                    { urls: 'stun:stun3.l.google.com:19302' }
+                ]
+            }
+        };
+        // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
     }
 
     // ==========================================
@@ -18,7 +31,13 @@ class NetworkManager {
     // ホストとして部屋を作る（引数なしならランダムな合言葉になる）
     hostRoom(roomId = null) {
         this.isHost = true;
-        this.peer = new Peer(roomId);
+        
+        // ▼ 修正：STUNサーバーの設定を読み込ませてPeerを作る
+        if (roomId) {
+            this.peer = new Peer(roomId, this.peerConfig);
+        } else {
+            this.peer = new Peer(this.peerConfig);
+        }
 
         this.peer.on('open', (id) => {
             this.myId = id;
@@ -35,7 +54,9 @@ class NetworkManager {
     // ゲストとして部屋に入る
     joinRoom(hostId) {
         this.isHost = false;
-        this.peer = new Peer();
+        
+        // ▼ 修正：STUNサーバーの設定を読み込ませてPeerを作る
+        this.peer = new Peer(this.peerConfig);
 
         this.peer.on('open', (id) => {
             this.myId = id;

@@ -1591,6 +1591,7 @@ class Player {
     }
 
     // ★新規メソッド：スキルボタンを押した時の処理
+// ★完全修正版：スキルボタンを押した時の処理
     activateSkill() {
         if (this.isDead || this.isBailingOut || !this.selectedSkill) return;
 
@@ -1603,29 +1604,39 @@ class Player {
         }
         */
 
-        // 攻撃付与型のスキル（旋空など）は、待機状態（ON/OFF）を切り替える
-        this.isSkillPrimed = !this.isSkillPrimed;
+        if (!this.isSkillPrimed) {
+            // ▼ スキルを【ON】にする時の処理
+            this.isSkillPrimed = true;
+            
+            // クラスごとの最大チャージ数をセット
+            let maxCharges = 0;
+            if (this.config.name === 'Gunner') maxCharges = 3;
+            else if (this.config.name === 'Sniper') maxCharges = 2;
+            else if (this.config.name === 'Shooter') maxCharges = 5;
+            else if (this.config.name === 'Kogetsu') maxCharges = 1;
+            else if (this.config.name === 'Scorpion') maxCharges = 3;
+            
+            this.skillCharges = maxCharges;
+            
+            // ★キャンセル時に「一発も使っていないか」を判定するため、ONにした瞬間の最大数を記憶
+            this.maxSkillChargesSnapshot = maxCharges;
 
-        if (this.isSkillPrimed) {
-            // ★発動した瞬間にチャージ数をセット（ポジションごとに変えると面白い）
-            if (this.config.name === 'Gunner') {
-                this.skillCharges = 3; // ガンナーは多めに連射できる
-            } else if (this.config.name === 'Sniper') {
-                this.skillCharges = 2;
-            } else if (this.config.name === 'Shooter') {
-                this.skillCharges = 5;  // シューターは強力なバースト3回分
-            } else if (this.config.name === 'Kogetsu') {
-                this.skillCharges = 1;  // 旋空は今まで通り1回
-            } else if (this.config.name === 'Scorpion') {
-                // ★追加：マンティスは3回分振れるように設定
-                this.skillCharges = 3;
-            }
         } else {
-            // ★追加：手動でOFFにした場合もクールダウンを開始させる
-            this.skillTimer = this.skillCooldown;
+            // ▼ スキルを【手動でOFF（キャンセル）】にする時の処理
+            
+            // ★現在の残弾と、記憶しておいた最大数を比較
+            if (this.skillCharges < this.maxSkillChargesSnapshot) {
+                // 一発でも撃って減っていたら、ペナルティとしてクールダウン開始
+                this.skillTimer = this.skillCooldown;
+            } else {
+                // 一発も撃っていなければ（数が同じなら）、クールダウンなし！
+                this.skillTimer = 0;
+            }
+            
+            // 状態をリセット
+            this.isSkillPrimed = false;
             this.skillCharges = 0;
         }
-
     }
 
     setClass(className) {
