@@ -724,19 +724,40 @@ class Game {
         window.addEventListener('keyup', (e) => this.keys[e.code] = false);
         window.addEventListener('contextmenu', (e) => e.preventDefault());
 
+        // ▼ 1. pointerdown を上書き
         window.addEventListener('pointerdown', (e) => {
             if (e.pointerType === 'mouse') {
-                if (e.button === 0) this.isMouseDown = true;
+                if (e.button === 0) {
+                    this.isMouseDown = true;
+                    // ★追加：左クリック（攻撃）を押した瞬間に、右クリック（シールド）を強制解除！
+                    this.isShieldingInput = false; 
+                }
                 if (e.button === 2) this.isShieldingInput = true;
             }
             this.handlePointerDown(e);
         });
 
+        // ▼ 2. pointermove を上書き
         window.addEventListener('pointermove', (e) => {
+            if (e.pointerType === 'mouse') {
+                // ★追加：マウスの「実際のボタン状態(e.buttons)」と同期させて押しっぱなしバグを防ぐ！
+                if ((e.buttons & 1) === 0) this.isMouseDown = false;
+                if ((e.buttons & 2) === 0) this.isShieldingInput = false;
+            }
             this.mousePos = this.getAdjustedCanvasPos(e);
             this.handlePointerMove(e);
         });
 
+        // ▼ 3. pointerleave を新規追加（pointermove と pointerup の間に挿入）
+        // ★追加：マウスがゲーム画面の外に出た時に、すべての入力を安全にリセットする
+        window.addEventListener('pointerleave', (e) => {
+            if (e.pointerType === 'mouse') {
+                this.isMouseDown = false;
+                this.isShieldingInput = false;
+            }
+        });
+
+        // ▼ 4. pointerup は元のままでOKです（念のため記載）
         window.addEventListener('pointerup', (e) => {
             if (e.pointerType === 'mouse') {
                 if (e.button === 0) this.isMouseDown = false;
